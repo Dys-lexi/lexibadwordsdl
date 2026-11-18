@@ -2,47 +2,59 @@ import json
 import requests
 import threading
 import time
+import traceback
 import functools
 from psycopg2.extras import Json
 from initsql import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
 print("start")
 def dothing(matchid):
-    print("doing",matchid)
-    now = time.time()
-    with querywrapper() as query:
-        query.execute("SELECT parsedcorrectly FROM match WHERE match_id = %s LIMIT 1",(matchid,))
-        output = query.fetchone()
-    if output and output[0]: 
-        return (matchid,False)
-    r = requests.get(f"https://api.deadlock-api.com/v1/matches/{matchid}/salts")
-    if r.status_code == 429 or r.status_code == 500:
-        return (matchid,True)
-    if "application/json" not in r.headers.get("Content-Type", ""):
-        print("salt failed for",matchid)
-        return matchid
-    print("got salt",matchid)
-
-    if "demo_url" in r.json() and not r.json()["demo_url"]:
-        return (matchid,False)
-    elif "demo_url" not in r.json():
-        return (matchid,True)
-
-    url = r.json()["demo_url"]
-    
-    payload = {"url": url, "run": ["deadlock-chat-messages"]}
-    print("downloading / parsing demo")
     try:
-        request = requests.post("http://localhost:80/parse", 
-                        json=payload,
-                        headers={"Content-Type": "application/json"})
-    except:
-        return (matchid,True)
-    print("Parsed demo",matchid,"in",f"{time.time()-now:.3f} seconds")
-    
-    # print(json.dumps(request.json(),indent=4))
-    # with open ("xyz.json","w") as f:
-    #     (json.dump(request.json(),f,indent=4))
+        print("doing",matchid)
+        now = time.time()
+        with querywrapper() as query:
+            query.execute("SELECT parsedcorrectly FROM match WHERE match_id = %s LIMIT 1",(matchid,))
+            output = query.fetchone()
+        if output and output[0]: 
+            print("failed here - already questioned")
+            return (matchid,False)
+        r = requests.get(f"https://api.deadlock-api.com/v1/matches/{matchid}/salts")
+        if r.status_code == 429 or r.status_code == 500:
+            return (matchid,True)
+        if "application/json" not in r.headers.get("Content-Type", ""):
+            print("salt failed for",matchid)
+            return matchid
+        print("got salt",matchid)
+
+        if "demo_url" in r.json() and not r.json()["demo_url"]:
+            print("failed here2",r.text)
+            return (matchid,False)
+        elif "demo_url" not in r.json():
+            return (matchid,True)
+
+        url = r.json()["demo_url"]
+        
+        payload = {"url": url, "run": ["deadlock-chat-messages"]}
+        print("downloading / parsing demo")
+        try:
+            request = requests.post("http://localhost:80/parse", 
+                            json=payload,
+                            headers={"Content-Type": "application/json"})
+        except:
+            return (matchid,True)
+        
+        print("Parsed demo",matchid,"in",f"{time.time()-now:.3f} seconds")
+        
+        # print(json.dumps(request.json(),indent=4))
+        # with open ("xyz.json","w") as f:
+        #     (json.dump(request.json(),f,indent=4))
+        x = request.json()
+        if "results" not in x:
+            print("failed3",x)
+            return (matchid,True)
+    except Exception:
+        traceback.print_exc()
+
     return request.json()
 
 
@@ -53,15 +65,17 @@ def dothingparttwo(matchid):
 def main():
     while True:
         with querywrapper() as query:
-            query.execute("SELECT match_id FROM match WHERE parsedcorrectly = false ORDER BY unix LIMIT 1000")
+            query.execute("SELECT match_id FROM match WHERE parsedcorrectly = false ORDER BY match_id LIMIT 1000")
             unfinisheddownloads = query.fetchall()
             if not unfinisheddownloads:
-                query.execute("SELECT match_id FROM match WHERE parsedcorrectly = true ORDER BY unix DESC LIMIT 1")
+                query.execute("SELECT match_id FROM match WHERE parsedcorrectly = true ORDER BY match_id DESC LIMIT 1")
                 output = query.fetchone()
                 mostrecentmatchid = output and output[0] or 138067450 or 138067446
+                print(output)
+                print(mostrecentmatchid,"mostrecent")
         if not unfinisheddownloads:
             print("doing new matches")
-            r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":1000,"format":"json","order_direction":"asc","min_match_id":mostrecentmatchid,"max_unix_timestamp":int(time.time()-3600*5)})
+            r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":100,"format":"json","order_direction":"asc","min_match_id":mostrecentmatchid,"max_unix_timestamp":int(time.time()-3600*5)})
         else:
             print("redoing broken matches")
             r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":1000,"format":"json","order_direction":"asc","match_ids":",".join(list(map(lambda x: str(x[0]),unfinisheddownloads)))})
@@ -81,7 +95,10 @@ def main():
             ]
 
             for i, game in enumerate(as_completed(games)):
-                parsegame(game.result(),i)
+                try:
+                    parsegame(game.result(),i)
+                except Exception:
+                    traceback.print_exc()            
                 
         print("sleep time!")
         time.sleep(5)
@@ -96,13 +113,14 @@ def main():
 
 def parsegame(game,i):
     # print(type(game))
-    if type(game) == tuple or "results" not in game:
+    if type(game) == tuple:
         print("could not parse",game)
         if game[1]:
             with querywrapper() as query:
-                query.execute("INSERT INTO match (match_id,unix,parsedcorrectly) VALUES (%s,%s,%s)",(game[0],int(time.time()),False))
+                query.execute("INSERT INTO match (match_id,parsedcorrectly) VALUES (%s,%s)",(game[0],False))
                 query.commit()
         return
+    game = game["results"]["deadlock-chat-messages"]
     print("saving game",game["match"]["match_id"])
     with querywrapper() as query:
         query.execute("SELECT table_name,column_name FROM information_schema.columns")
