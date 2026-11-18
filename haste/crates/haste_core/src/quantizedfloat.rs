@@ -1,0 +1,338 @@
+use dungers::bitbuf::BitError;
+
+use crate::bitreader::BitReader;
+
+// NOTE: this is composite of stuff from butterfly, clarity, manta and leaked csgo.
+
+#[derive(thiserror::Error, Debug)]
+#[error("encode flags are both round up and down, these flags are mutually exclusive")]
+pub struct InvalidEncodeFlagsError;
+
+#[derive(thiserror::Error, Debug)]
+#[error("invalid range")]
+pub struct InvalidRangeError;
+
+// TODO: more errors, treat what clarity treats as warnings as errors?
+#[derive(thiserror::Error, Debug)]
+pub enum QuantizedFloatError {
+    #[error(transparent)]
+    InvalidEncodeFlags(#[from] InvalidEncodeFlagsError),
+    #[error(transparent)]
+    InvalidRange(#[from] InvalidRangeError),
+}
+
+const QFE_ROUNDDOWN: i32 = 1 << 0;
+const QFE_ROUNDUP: i32 = 1 << 1;
+const QFE_ENCODE_ZERO_EXACTLY: i32 = 1 << 2;
+const QFE_ENCODE_INTEGERS_EXACTLY: i32 = 1 << 3;
+
+// stolen from quantizedfloat.go in manta
+fn compute_encode_flags(
+    encode_flags: i32,
+    low_value: f32,
+    high_value: f32,
+) -> Result<i32, InvalidEncodeFlagsError> {
+    let mut efs = encode_flags;
+
+    if efs == 0 {
+        return Ok(efs);
+    }
+
+    // Discard zero flag when encoding min / max set to 0
+    if (low_value == 0.0 && (efs & QFE_ROUNDDOWN) != 0)
+        || (high_value == 0.0 && (efs & QFE_ROUNDUP) != 0)
+    {
+        efs &= !QFE_ENCODE_ZERO_EXACTLY;
+    }
+
+    // If min / max is zero when encoding zero, switch to round up / round down
+    // instead
+    if low_value == 0.0 && (efs & QFE_ENCODE_ZERO_EXACTLY) != 0 {
+        efs |= QFE_ROUNDDOWN;
+        efs &= !QFE_ENCODE_ZERO_EXACTLY;
+    }
+    if high_value == 0.0 && (efs & QFE_ENCODE_ZERO_EXACTLY) != 0 {
+        efs |= QFE_ROUNDUP;
+        efs &= !QFE_ENCODE_ZERO_EXACTLY;
+    }
+
+    // If the range doesn't span across zero, then also don't need the zero flag
+    if !(low_value < 0.0 && high_value > 0.0) {
+        efs &= !QFE_ENCODE_ZERO_EXACTLY;
+    }
+
+    // If we are left with encode zero, only leave integer flag
+    if (efs & QFE_ENCODE_INTEGERS_EXACTLY) != 0 {
+        efs &= !(QFE_ROUNDUP | QFE_ROUNDDOWN | QFE_ENCODE_ZERO_EXACTLY);
+    }
+
+    // Verify that we don;t have roundup / rounddown set
+    if efs & (QFE_ROUNDDOWN | QFE_ROUNDUP) == (QFE_ROUNDDOWN | QFE_ROUNDUP) {
+        return Err(InvalidEncodeFlagsError);
+    }
+
+    Ok(efs)
+}
+
+const EQUAL_EPSILON: f32 = 0.001;
+
+// public/mathlib/mathlib.h
+fn close_enough(a: f32, b: f32, epsilon: f32) -> bool {
+    (a - b).abs() <= epsilon
+}
+
+// public/dt_send.cpp
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    reason = "mirrors the float / integer conversions of valve's c++"
+)]
+fn assign_range_multiplier(bit_count: u8, range: f64) -> Result<f32, InvalidRangeError> {
+    // NOTE(blukai): actually it should not be possible for bit_count to be 32 here - for that
+    // there's noscale decoder. but i'm not going to change this piece of code to comform original.
+    let high_value: u32 = 1_u32
+        .checked_shl(u32::from(bit_count))
+        .map_or(0xFFFFFFFE, |steps| steps.saturating_sub(1));
+
+    // NOTE(blukai): a general knowledge thing... in c++, when you perform an operation between two
+    // different numeric types, the result will be promoted to the type that can represent both
+    // operands with the least loss of precision. this process is called "type promotion" or "type
+    // coercion."
+
+    let mut high_low_mul = if close_enough(range as f32, 0.0, EQUAL_EPSILON) {
+        high_value as f32
+    } else {
+        (f64::from(high_value) / range) as f32
+    };
+
+    // (unsigned long)(fHighLowMul * range) > iHighValue ||
+    //   (fHighLowMul * range) > (double)iHighValue
+    let overflows = |high_low_mul: f32| {
+        (f64::from(high_low_mul) * range) as u32 > high_value
+            || (f64::from(high_low_mul) * range) > f64::from(high_value)
+    };
+
+    // If the precision is messing us up, then adjust it so it won't.
+    if overflows(high_low_mul) {
+        // Squeeze it down smaller and smaller until it's going to produce an
+        // integer in the valid range when given the highest value.
+        const MULTIPLIERS: [f32; 5] = [0.9999, 0.99, 0.9, 0.8, 0.7];
+        high_low_mul = MULTIPLIERS
+            .iter()
+            // fHighLowMul = (float)( iHighValue / range ) iHighValue is
+            // unsigned long and range is a double -> the intermediate result
+            // during the division will be a double due to type promotion in cpp.
+            .map(|multiplier| (f64::from(high_value) / range) as f32 * multiplier)
+            .find(|&high_low_mul| !overflows(high_low_mul))
+            // Doh! We seem to be unable to represent this range.
+            .ok_or(InvalidRangeError)?;
+    }
+
+    Ok(high_low_mul)
+}
+
+// public/dt_common.h
+const fn num_bits_for_count(n_max_elements: i64) -> u32 {
+    if n_max_elements > 0 {
+        i64::BITS.saturating_sub(n_max_elements.leading_zeros())
+    } else {
+        0
+    }
+}
+
+// NOTE: Clone is derived because QuantizedFloatDecoder that implmenets Decode
+// trait needs it
+#[derive(Debug, Clone)]
+pub(crate) struct QuantizedFloat {
+    /// 1..=31
+    bit_count: u8,
+    encode_flags: i32,
+    low_value: f32,
+    high_value: f32,
+
+    high_low_mul: f32,
+    decode_mul: f32,
+}
+
+impl QuantizedFloat {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        reason = "mirrors the float / integer conversions of valve's c++"
+    )]
+    pub(crate) fn new(
+        bit_count: i32,
+        encode_flags: i32,
+        low_value: f32,
+        high_value: f32,
+    ) -> Result<Self, QuantizedFloatError> {
+        // NOTE(blukai): quantized float decoder wouldn't be able to decode non-quantized float
+        // correctly.
+        //
+        // NOTE: the bit count comes from the (untrusted) demo, so a bad one is an error, not a
+        // panic.
+        let bit_count = u8::try_from(bit_count)
+            .ok()
+            .filter(|bit_count| (1..32).contains(bit_count))
+            .ok_or(InvalidRangeError)?;
+
+        let mut qf = Self {
+            bit_count,
+            encode_flags,
+            low_value,
+            high_value,
+            high_low_mul: 0.0,
+            decode_mul: 0.0,
+        };
+
+        qf.encode_flags = compute_encode_flags(qf.encode_flags, qf.low_value, qf.high_value)?;
+        // NOTE: i64, so that `steps - 1` can't overflow for a bit count of 31.
+        let mut steps: i64 = 1 << qf.bit_count;
+
+        let range = qf.high_value - qf.low_value;
+        let offset = range / steps as f32;
+        if qf.encode_flags & QFE_ROUNDDOWN != 0 {
+            qf.high_value -= offset;
+        } else if qf.encode_flags & QFE_ROUNDUP != 0 {
+            qf.low_value += offset;
+        }
+
+        if qf.encode_flags & QFE_ENCODE_INTEGERS_EXACTLY != 0 {
+            // NOTE: i64, so that untrusted low / high values can't overflow the subtraction or the
+            // shifts below.
+            let delta = i64::from(qf.low_value as i32)
+                .saturating_sub(i64::from(qf.high_value as i32))
+                .max(1);
+            // `delta` < 2^32, so this is at most 32.
+            let range_bits = num_bits_for_count(delta);
+
+            // the smallest bit count (but no less than the current one) that fits the range of
+            // `1 << range_bits`. a quantized float can't have more than 31 bits (see the bit count
+            // check above).
+            let bc = u8::try_from(range_bits)
+                .ok()
+                .filter(|&bc| bc < 32)
+                .ok_or(InvalidRangeError)?;
+            let range = (1_i64 << bc) as f32;
+            if bc > qf.bit_count {
+                qf.bit_count = bc;
+                steps = 1 << bc;
+            }
+
+            let offset = range / steps as f32;
+            qf.high_value = qf.low_value + range - offset;
+        }
+
+        let range = qf.high_value - qf.low_value;
+        qf.high_low_mul = assign_range_multiplier(qf.bit_count, f64::from(range))?;
+        // `steps` >= 2
+        qf.decode_mul = 1.0 / steps.saturating_sub(1) as f32;
+
+        // Remove unessecary flags
+        if (qf.encode_flags & QFE_ROUNDDOWN) != 0
+            && (qf.quantize(qf.low_value) - qf.low_value).abs() < 0.0001
+        {
+            qf.encode_flags &= !QFE_ROUNDDOWN;
+        }
+        if (qf.encode_flags & QFE_ROUNDUP) != 0
+            && (qf.quantize(qf.high_value) - qf.high_value).abs() < 0.0001
+        {
+            qf.encode_flags &= !QFE_ROUNDUP;
+        }
+        if (qf.encode_flags & QFE_ENCODE_ZERO_EXACTLY) != 0 && qf.quantize(0.0) == 0.0 {
+            qf.encode_flags &= !QFE_ENCODE_ZERO_EXACTLY;
+        }
+
+        Ok(qf)
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        reason = "mirrors the float / integer conversions of valve's c++"
+    )]
+    fn quantize(&self, value: f32) -> f32 {
+        if value < self.low_value {
+            return self.low_value;
+        } else if value > self.high_value {
+            return self.high_value;
+        }
+
+        let range = self.high_value - self.low_value;
+        let i = ((value - self.low_value) * self.high_low_mul) as i32;
+        self.low_value + range * (i as f32 * self.decode_mul)
+    }
+
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a value of at most 31 bits scaled into an f32"
+    )]
+    pub(crate) fn decode(&self, br: &mut BitReader) -> Result<f32, BitError> {
+        if (self.encode_flags & QFE_ROUNDDOWN) != 0 && br.read_bool()? {
+            return Ok(self.low_value);
+        }
+
+        if (self.encode_flags & QFE_ROUNDUP) != 0 && br.read_bool()? {
+            return Ok(self.high_value);
+        }
+
+        if (self.encode_flags & QFE_ENCODE_ZERO_EXACTLY) != 0 && br.read_bool()? {
+            return Ok(0.0);
+        }
+
+        let range = self.high_value - self.low_value;
+        let value = br.read_ubit64(usize::from(self.bit_count))?;
+        Ok(self.low_value + range * (value as f32 * self.decode_mul))
+    }
+
+    pub(crate) fn skip_bits(&self, br: &mut BitReader) -> Result<(), BitError> {
+        // the (up to 3) flag bits come from one peek; a set flag ends the value.
+        let flags = br.peek_ubit64_zero_extended(3);
+        let mut pos: u32 = 0;
+        for flag in [QFE_ROUNDDOWN, QFE_ROUNDUP, QFE_ENCODE_ZERO_EXACTLY] {
+            if self.encode_flags & flag != 0 {
+                let set = (flags >> pos) & 1 != 0;
+                pos = pos.saturating_add(1);
+                if set {
+                    return br.skip_bits(pos as usize);
+                }
+            }
+        }
+        br.skip_bits((pos as usize).saturating_add(usize::from(self.bit_count)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_integers_exactly_with_huge_range_is_an_error() {
+        // `low - high` does not fit an i32 and needs more than 31 bits.
+        assert!(matches!(
+            QuantizedFloat::new(8, QFE_ENCODE_INTEGERS_EXACTLY, 2e9, -2e9),
+            Err(QuantizedFloatError::InvalidRange(_))
+        ));
+    }
+
+    #[test]
+    fn encode_integers_exactly_with_31_bit_range() {
+        // `1 << 31` used to wrap to a negative i32 range here.
+        let qf = QuantizedFloat::new(8, QFE_ENCODE_INTEGERS_EXACTLY, 2e9, -1e8).unwrap();
+        assert_eq!(qf.bit_count, 31);
+    }
+
+    #[test]
+    fn max_bit_count_does_not_overflow() {
+        let qf = QuantizedFloat::new(31, 0, 0.0, 1.0).unwrap();
+        assert_eq!(qf.bit_count, 31);
+    }
+
+    #[test]
+    fn encode_integers_exactly_widens_bit_count() {
+        // delta = 300 - 0 needs 9 bits.
+        let qf = QuantizedFloat::new(4, QFE_ENCODE_INTEGERS_EXACTLY, 300.0, 0.0).unwrap();
+        assert_eq!(qf.bit_count, 9);
+    }
+}

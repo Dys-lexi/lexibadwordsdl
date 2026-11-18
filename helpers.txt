@@ -1,0 +1,2 @@
+https://api.deadlock-api.com/v1/matches/134763078/salts
+zstd -d -k -o output.dem input.dem.bz2

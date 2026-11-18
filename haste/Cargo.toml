@@ -1,0 +1,70 @@
+[package]
+name = "haste"
+version = "0.0.0"
+edition.workspace = true
+default-run = "haste-server"
+
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+
+[workspace.dependencies]
+haste_broadcast = { path = "crates/haste_broadcast" }
+haste_core = { path = "crates/haste_core" }
+haste_vartype = { path = "crates/haste_vartype" }
+dungers = { path = "crates/dungers" }
+dungers_bitbuf = { path = "crates/dungers_bitbuf" }
+dungers_charsor = { path = "crates/dungers_charsor" }
+dungers_varint = { path = "crates/dungers_varint" }
+valveprotos = { path = "crates/valveprotos" }
+base64 = "0.23.1"
+bytes = "1.12.1"
+expect-test = "1.5.1"
+hashbrown = { version = "0.17.1", default-features = false }
+http = "1.5.0"
+log = "0.4.35"
+nohash = "0.2.0"
+prost = "0.14.6"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+snap = "1.1.2"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[features]
+# Async, source-driven streaming parser (AsyncStreamingParser + AsyncDemoStream
+# implementations). Forwards to haste_core's async feature.
+async = ["haste_core/async"]
+
+[dependencies]
+haste_broadcast.workspace = true
+haste_core.workspace = true
+base64.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+axum = "0.8.9"
+bzip2 = "0.6"
+zstd = "0.14"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+tokio = { workspace = true, features = ["net", "signal", "sync", "time"] }
+
+[dev-dependencies]
+tower = { version = "0.5.3", features = ["util"] }
+
+[profile.release]
+strip = true
+
+[[bin]]
+name = "haste-server"
+path = "src/bin/haste-server.rs"
+
+[lints]
+workspace = true

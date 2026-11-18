@@ -1,0 +1,10 @@
+target/
+.git/
+.agents/
+.codex/
+.env
+.env.*
+**/*.dem
+**/*.bz2
+**/*.zst
+**/*.dem.bz2
