@@ -87,7 +87,7 @@ pub(super) fn record(
     heroes: &BTreeMap<u32, String>,
     names: &BTreeMap<u64, String>,
 ) -> Result<Option<Value>, io::Error> {
-    let event = if packet_type == CitadelUserMessageIds::KEUserMsgHeroKilled as u32 {
+    let mut event = if packet_type == CitadelUserMessageIds::KEUserMsgHeroKilled as u32 {
         let killed = CCitadelUserMsgHeroKilled::decode(data).map_err(io::Error::other)?;
         let scorer = killed
             .entindex_scorer
@@ -135,5 +135,28 @@ pub(super) fn record(
     } else {
         return Ok(None);
     };
+    for prefix in ["victim", "killer"] {
+        let actor = event
+            .as_object_mut()
+            .and_then(|event| event.remove(prefix))
+            .unwrap_or(Value::Null);
+        for field in [
+            "account_id",
+            "class",
+            "class_id",
+            "entity_class",
+            "entity_index",
+            "player_slot",
+            "team",
+            "uid",
+        ] {
+            let key = format!("{prefix}_{field}");
+            // HeroKilled also reports victim_team directly. Preserve that value
+            // when present, even if the victim entity cannot be resolved.
+            if event.get(&key).is_none_or(Value::is_null) {
+                event[key] = actor.get(field).cloned().unwrap_or(Value::Null);
+            }
+        }
+    }
     Ok(Some(event))
 }

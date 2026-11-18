@@ -334,6 +334,7 @@ fn death_packets_return_only_death_events_in_order() {
         entindex_victim: Some(15),
         entindex_attacker: Some(-1),
         entindex_scorer: Some(-1),
+        victim_team_number: Some(2),
         ..Default::default()
     }
     .encode_to_vec();
@@ -352,30 +353,50 @@ fn death_packets_return_only_death_events_in_order() {
     let events = result["events"].as_array().unwrap();
     assert_eq!(events.len(), 4);
     assert_eq!(events[0]["type"], "player_death");
-    assert_eq!(events[0]["victim"]["entity_index"], 10);
-    assert_eq!(events[0]["killer"]["entity_index"], 12);
+    assert_eq!(events[0]["victim_entity_index"], 10);
+    assert_eq!(events[0]["killer_entity_index"], 12);
     assert_eq!(events[0]["attacker"]["entity_index"], 11);
     assert_eq!(events[0]["assists"][0]["entity_index"], 13);
     assert_eq!(events[0]["assists"][1]["entity_index"], 14);
-    assert!(events[0]["killer"]["uid"].is_null());
+    assert!(events[0]["killer_uid"].is_null());
     assert!(events[0]["game_time"].is_null()); // No game clock in this synthetic demo.
     assert_eq!(events[1]["type"], "objective_death");
-    assert_eq!(events[1]["victim"]["entity_index"], 20);
-    assert_eq!(events[1]["victim"]["class_id"], 31);
-    assert!(events[1]["victim"]["class"].is_null());
-    assert!(events[1]["killer"]["class_id"].is_null());
+    assert_eq!(events[1]["victim_entity_index"], 20);
+    assert_eq!(events[1]["victim_class_id"], 31);
+    assert!(events[1]["victim_class"].is_null());
+    assert!(events[1]["killer_class_id"].is_null());
     assert!(
         events
             .iter()
             .all(|event| event.get("entity_killed_class").is_none())
     );
-    assert_eq!(events[1]["killer"]["entity_index"], 21);
+    assert_eq!(events[1]["killer_entity_index"], 21);
     assert_eq!(events[1]["objective_team"], 3);
     assert!(events[1]["assists"].is_null());
-    assert!(events[2]["killer"].is_null());
+    assert_eq!(events[2]["victim_team"], 2);
     assert_eq!(events[2]["assists"], json!([]));
-    assert!(events[3]["victim"].is_null());
-    assert!(events[3]["killer"].is_null());
+    for event in events {
+        assert!(event.get("victim").is_none());
+        assert!(event.get("killer").is_none());
+        for prefix in ["victim", "killer"] {
+            for field in [
+                "account_id",
+                "class",
+                "class_id",
+                "entity_class",
+                "entity_index",
+                "player_slot",
+                "team",
+                "uid",
+            ] {
+                let key = format!("{prefix}_{field}");
+                assert!(event.get(&key).is_some(), "missing {key}");
+                if (event == &events[2] && prefix == "killer") || event == &events[3] {
+                    assert!(event[&key].is_null(), "expected null {key}");
+                }
+            }
+        }
+    }
 }
 
 fn bz2(bytes: &[u8]) -> Vec<u8> {

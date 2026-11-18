@@ -39,10 +39,11 @@ def dothing(matchid):
     except:
         return (matchid,True)
     print("Parsed demo",matchid,"in",f"{time.time()-now:.3f} seconds")
-    return request.json()
+    
     print(json.dumps(request.json(),indent=4))
     with open ("xyz.json","w") as f:
         (json.dump(request.json(),f,indent=4))
+    return request.json()
 
 
 def dothingparttwo(matchid):
@@ -101,6 +102,7 @@ def parsegame(game,i):
         return
     
     game = game["results"]["deadlock-chat-messages"]
+    print("saving game",game["match"]["match_id"])
     with querywrapper() as query:
         query.execute("SELECT table_name,column_name FROM information_schema.columns")
         rows = functools.reduce(lambda a,b: {**a,b[0]:[*a.get(b[0],[]),b[1]]}, query.fetchall(),{})
@@ -114,16 +116,29 @@ def parsegame(game,i):
         game["match"] = {**game["match"],"parsedcorrectly":True}
         # print(f"UPDATE match SET {",".join(list(map(lambda x: f"{x} = %s" ,list(filter(lambda x: x in rows["match"],game["match"])))))} WHERE match_id = %s")
         query.execute(f"UPDATE match SET {",".join(list(map(lambda x: f"{x} = %s" ,list(filter(lambda x: x in rows["match"],game["match"])))))} WHERE match_id = %s",(*list(map(lambda x: type(x[1]) == list and Json(x[1]) or x[1],filter(lambda x: x[0] in rows["match"],game["match"].items()))),game["match"]["match_id"]))
-        for data in game["chat"]:
-            data = {**game["match"],**data}
+        for chat_number, data in enumerate(game["chat"]):
+            data = {**game["match"],**data,"chat_number":chat_number}
             # print(data)
             # print(rows[table])
             # print(list(filter(lambda x: x in rows[table],data)))
             # print(f"INSERT INTO {table} ({",".join(list(filter(lambda x: x in rows[table],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows[table],data))))})")
             # print(list(map(lambda x: x[1],filter(lambda x: x[0] in rows[table],data.items()))))
             query.execute(f"INSERT INTO {"chat"} ({",".join(list(filter(lambda x: x in rows["chat"],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows["chat"],data))))})",list(map(lambda x: x[1],filter(lambda x: x[0] in rows["chat"],data.items()))))
-        for data in game["events"]:
+        for event_number,data in enumerate(game["events"]):
+            
+            # print(list(map(lambda x: x.removeprefix("attacker_") ,rows["events"])),"wqdwqdwq")
+            # print("eee",data["assists"])
+            for i,thing in enumerate(data["assists"] or []) :
+                data["assists"][i] = dict(filter(lambda x: x[0] in list(map(lambda x: x.removeprefix("attacker_") ,rows["events"])),thing.items()))
+            data = {**game["match"],**data,"event_number":event_number,"assists":Json(data["assists"])}
+            # print(json.dumps(data,indent=4))
+            # break
+            # print(f"INSERT INTO {"events"} ({",".join(list(filter(lambda x: x in rows["events"],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows["events"],data))))})")
+            # print(list(map(lambda x: x[1],filter(lambda x: x[0] in rows["events"],data.items()))))
+            query.execute(f"INSERT INTO {"events"} ({",".join(list(filter(lambda x: x in rows["events"],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows["events"],data))))})",list(map(lambda x: x[1],filter(lambda x: x[0] in rows["events"],data.items()))))
+
         query.commit()
+    print("saved game",game["match"]["match_id"])
         
         
 

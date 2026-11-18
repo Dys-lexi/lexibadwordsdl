@@ -82,20 +82,22 @@ Unknown mode IDs are preserved with null names. Match details are returned even
 when there are no chat messages. Existing fields inside each chat message remain.
 
 The sibling `events` array contains only `player_death` and `objective_death`
-events, in replay order. Each event includes `tick`, `game_time`, `victim`,
-`killer`, and `assists`. Actors include `uid`/`account_id`, `player_slot`, `team`,
-`class`/`class_id`, `entity_index`, and `entity_class` when known. Non-player or
-unresolved killers keep their entity information with null player IDs. An
-invalid/missing entity reference is null.
+events, in replay order. Each event includes `tick`, `game_time`, and `assists`.
+Victim and killer fields are flat: `victim_account_id`, `killer_account_id`,
+`victim_class`, `killer_class`, etc. Both prefixes include `uid`, `account_id`,
+`player_slot`, `team`, `class`, `class_id`, `entity_index`, and `entity_class`.
+There are no nested `victim` or `killer` objects. Unavailable fields are null;
+the packet's explicit `victim_team` is preserved even if its entity is missing.
+`attacker` and entries inside `assists` remain actor objects.
 
 Player deaths use `HeroKilled`, including the credited scorer as `killer`, the
 actual `attacker`, and the packet's assister list (`[]` means no assisters).
 Objective deaths use `BossKilled`, with objective team/mask and bosses remaining.
-`victim.class_id` contains the hero ID for player deaths and the raw
+`victim_class_id` contains the hero ID for player deaths and the raw
 `BossKilled.entity_killed_class` code for objective deaths; these are separate
 ID systems, distinguished by the event type. There is no separate
 `entity_killed_class` output field. Objective class codes are not mapped to hero
-names; use `victim.entity_class` for the entity's network class name.
+names; use `victim_entity_class` for the entity's network class name.
 That packet does not contain assists, so
 objective `assists` is null (unavailable). Objective `server_game_time` preserves
 the raw packet timestamp; `game_time` uses the same match clock as chat. If the

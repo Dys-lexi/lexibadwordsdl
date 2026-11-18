@@ -222,7 +222,7 @@ def init():
     attacker_class TEXT,
     attacker_class_id INTEGER,
     attacker_entity_class TEXT,
-    killer_ability_id INTEGER,
+    killer_ability_id BIGINT,
     game_time INTEGER,
     first_blood BOOLEAN,
     match_id INTEGER,
@@ -230,7 +230,9 @@ def init():
     victim_account_id INTEGER,
     victim_class TEXT,
     victim_class_id INTEGER,
-    victim_entity_class TEXT
+    victim_entity_class TEXT,
+    event_number INTEGER,
+    PRIMARY KEY(match_id, event_number)
     )""")
 
     c.execute("""CREATE TABLE IF NOT EXISTS chat (
@@ -242,7 +244,9 @@ def init():
     assists INTEGER,
     souls INTEGER,
     text TEXT,
-    match_id INTEGER
+    match_id INTEGER,
+    chat_number INTEGER,
+    PRIMARY KEY(match_id, chat_number)
     )""")
 
     c.execute("""CREATE TABLE IF NOT EXISTS player (
