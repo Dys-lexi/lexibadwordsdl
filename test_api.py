@@ -122,6 +122,7 @@ def parsegame(game,i):
             # print(f"INSERT INTO {table} ({",".join(list(filter(lambda x: x in rows[table],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows[table],data))))})")
             # print(list(map(lambda x: x[1],filter(lambda x: x[0] in rows[table],data.items()))))
             query.execute(f"INSERT INTO {"chat"} ({",".join(list(filter(lambda x: x in rows["chat"],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows["chat"],data))))})",list(map(lambda x: x[1],filter(lambda x: x[0] in rows["chat"],data.items()))))
+        for data in game["events"]:
         query.commit()
         
         
