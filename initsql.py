@@ -194,10 +194,10 @@ def init():
     conn = pgpool.getconn()
 
     c = conn.cursor()
-    c.execute("DROP TABLE IF EXISTS match")
-    c.execute("DROP TABLE IF EXISTS chat")
-    c.execute("DROP TABLE IF EXISTS events")
-    c.execute("DROP TABLE IF EXISTS players")
+    # c.execute("DROP TABLE IF EXISTS match")
+    # c.execute("DROP TABLE IF EXISTS chat")
+    # c.execute("DROP TABLE IF EXISTS events")
+    # c.execute("DROP TABLE IF EXISTS players")
     c.execute("""CREATE TABLE IF NOT EXISTS match (
     match_id INTEGER,
     game_mode TEXT,
@@ -209,7 +209,7 @@ def init():
     outcome TEXT,
     outcome_id INTEGER,
     players JSONB,
-    acccount_ids INTEGER[],
+    account_ids INTEGER[],
     teams JSONB,
     unix INTEGER,
     winning_team INTEGER,
@@ -220,7 +220,6 @@ def init():
     c.execute("""CREATE TABLE IF NOT EXISTS events (
     assists JSONB,
     killer_account_id INTEGER,
-    killer_class TEXT,
     killer_class_id INTEGER,
     killer_entity_class TEXT,
     killer_ability_id BIGINT,
@@ -229,13 +228,14 @@ def init():
     match_id INTEGER,
     type TEXT,
     victim_account_id INTEGER,
-    victim_class TEXT,
+
     victim_class_id INTEGER,
     victim_entity_class TEXT,
     event_number INTEGER,
     PRIMARY KEY(match_id, event_number)
     )""")
-
+        # victim_class TEXT,
+            # killer_class TEXT,
     c.execute("""CREATE TABLE IF NOT EXISTS chat (
     game_time INTEGER,
     all_chat BOOLEAN,
