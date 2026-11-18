@@ -6081,6 +6081,7 @@
                         "deaths": 3,
                         "kills": 13,
                         "lobby_team": 0,
+                        "personaname": "villiam06",
                         "player_slot": 5,
                         "team": 2,
                         "uid": 190749708
@@ -6093,6 +6094,7 @@
                         "deaths": 4,
                         "kills": 5,
                         "lobby_team": 0,
+                        "personaname": "ChrisP",
                         "player_slot": 6,
                         "team": 2,
                         "uid": 354738033
@@ -6105,6 +6107,7 @@
                         "deaths": 4,
                         "kills": 11,
                         "lobby_team": 0,
+                        "personaname": "Ntr",
                         "player_slot": 3,
                         "team": 2,
                         "uid": 996394583
@@ -6117,6 +6120,7 @@
                         "deaths": 10,
                         "kills": 6,
                         "lobby_team": 1,
+                        "personaname": "WoodedMicrob",
                         "player_slot": 11,
                         "team": 3,
                         "uid": 111976289
@@ -6129,6 +6133,7 @@
                         "deaths": 6,
                         "kills": 4,
                         "lobby_team": 0,
+                        "personaname": "Bashix",
                         "player_slot": 2,
                         "team": 2,
                         "uid": 78792823
@@ -6141,6 +6146,7 @@
                         "deaths": 6,
                         "kills": 2,
                         "lobby_team": 1,
+                        "personaname": "[\u2606] Mr Mikey",
                         "player_slot": 12,
                         "team": 3,
                         "uid": 52860865
@@ -6153,6 +6159,7 @@
                         "deaths": 10,
                         "kills": 2,
                         "lobby_team": 1,
+                        "personaname": "CRAYON EATER",
                         "player_slot": 9,
                         "team": 3,
                         "uid": 1125019866
@@ -6165,6 +6172,7 @@
                         "deaths": 11,
                         "kills": 13,
                         "lobby_team": 1,
+                        "personaname": "Mulligan",
                         "player_slot": 7,
                         "team": 3,
                         "uid": 466813928
@@ -6177,6 +6185,7 @@
                         "deaths": 5,
                         "kills": 5,
                         "lobby_team": 0,
+                        "personaname": "Kauzge",
                         "player_slot": 1,
                         "team": 2,
                         "uid": 127247995
@@ -6189,6 +6198,7 @@
                         "deaths": 10,
                         "kills": 1,
                         "lobby_team": 1,
+                        "personaname": "MinatoXVS",
                         "player_slot": 10,
                         "team": 3,
                         "uid": 911230429
@@ -6201,6 +6211,7 @@
                         "deaths": 8,
                         "kills": 7,
                         "lobby_team": 1,
+                        "personaname": "Larus",
                         "player_slot": 8,
                         "team": 3,
                         "uid": 96846036
@@ -6213,6 +6224,7 @@
                         "deaths": 9,
                         "kills": 17,
                         "lobby_team": 0,
+                        "personaname": "Welvill_",
                         "player_slot": 4,
                         "team": 2,
                         "uid": 1232716260

@@ -5,7 +5,11 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use axum::routing::get;
 use haste::service::{Config, router};
-use haste::valveprotos::common::CDemoPacket;
+use haste::valveprotos::common::{
+    CDemoClassInfo, CDemoFullPacket, CDemoPacket, CDemoStringTables, CMsgPlayerInfo,
+    CsvcMsgCreateStringTable,
+    c_demo_string_tables::{ItemsT, TableT},
+};
 use haste::valveprotos::deadlock::{
     CCitadelUserMsgBossKilled, CCitadelUserMsgChatMsg, CCitadelUserMsgHeroKilled,
     CCitadelUserMsgPostMatchDetails, CMsgMatchMetaDataContents,
@@ -235,10 +239,10 @@ async fn final_match_scoreboard_is_returned_with_chat() {
     assert_eq!(
         info["players"],
         json!([
-            {"uid":12345,"account_id":12345,"player_slot":0,"team":2,"lobby_team":0,"kills":3,"deaths":4,"assists":5,"class":null,"class_id":null},
-            {"uid":23456,"account_id":23456,"player_slot":1,"team":2,"lobby_team":0,"kills":2,"deaths":6,"assists":7,"class":null,"class_id":null},
-            {"uid":34567,"account_id":34567,"player_slot":2,"team":3,"lobby_team":1,"kills":10,"deaths":5,"assists":8,"class":null,"class_id":null},
-            {"uid":45678,"account_id":45678,"player_slot":12,"team":null,"lobby_team":16,"kills":100,"deaths":100,"assists":100,"class":null,"class_id":null}
+            {"uid":12345,"account_id":12345,"player_slot":0,"team":2,"lobby_team":0,"kills":3,"deaths":4,"assists":5,"class":null,"class_id":null,"personaname":null},
+            {"uid":23456,"account_id":23456,"player_slot":1,"team":2,"lobby_team":0,"kills":2,"deaths":6,"assists":7,"class":null,"class_id":null,"personaname":null},
+            {"uid":34567,"account_id":34567,"player_slot":2,"team":3,"lobby_team":1,"kills":10,"deaths":5,"assists":8,"class":null,"class_id":null,"personaname":null},
+            {"uid":45678,"account_id":45678,"player_slot":12,"team":null,"lobby_team":16,"kills":100,"deaths":100,"assists":100,"class":null,"class_id":null,"personaname":null}
         ])
     );
     assert_eq!(
@@ -397,6 +401,77 @@ fn death_packets_return_only_death_events_in_order() {
             }
         }
     }
+}
+
+#[test]
+fn roster_personanames_come_from_userinfo_by_account_even_without_chat() {
+    let mut demo = b"PBDEMS2\0".to_vec();
+    demo.extend_from_slice(&[0; 8]);
+    append_packet(
+        &mut demo,
+        44,
+        &CsvcMsgCreateStringTable {
+            name: Some("userinfo".into()),
+            num_entries: Some(0),
+            ..Default::default()
+        }
+        .encode_to_vec(),
+    );
+    let classes = CDemoClassInfo::default().encode_to_vec();
+    demo.extend_from_slice(&[5, 42]);
+    varint(classes.len() as u32, &mut demo);
+    demo.extend(classes);
+    let full = CDemoFullPacket {
+        string_table: Some(CDemoStringTables {
+            tables: vec![TableT {
+                table_name: Some("userinfo".into()),
+                items: [(222, "Player 二"), (111, "Lexi \"test\"")]
+                    .into_iter()
+                    .map(|(id, name)| ItemsT {
+                        str: None,
+                        data: Some(
+                            CMsgPlayerInfo {
+                                steamid: Some(76_561_197_960_265_728 + id),
+                                name: Some(name.into()),
+                                ..Default::default()
+                            }
+                            .encode_to_vec(),
+                        ),
+                    })
+                    .collect(),
+                ..Default::default()
+            }],
+        }),
+        packet: None,
+    }
+    .encode_to_vec();
+    demo.extend_from_slice(&[13, 42]);
+    varint(full.len() as u32, &mut demo);
+    demo.extend(full);
+    demo.extend_from_slice(&[0, 42, 0]);
+    let demo = with_match_info(
+        demo,
+        MatchInfo {
+            players: [111, 222, 333]
+                .into_iter()
+                .enumerate()
+                .map(|(slot, id)| Players {
+                    account_id: Some(id),
+                    player_slot: Some(slot as u32),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        },
+    );
+    let result = haste::runners::chat_messages::run(std::io::Cursor::new(demo), None).unwrap();
+    assert_eq!(result["chat"], json!([]));
+    assert_eq!(
+        result["match"]["players"][0]["personaname"],
+        "Lexi \"test\""
+    );
+    assert_eq!(result["match"]["players"][1]["personaname"], "Player 二");
+    assert!(result["match"]["players"][2]["personaname"].is_null());
 }
 
 fn bz2(bytes: &[u8]) -> Vec<u8> {

@@ -197,6 +197,7 @@ def init():
     c.execute("DROP TABLE IF EXISTS match")
     c.execute("DROP TABLE IF EXISTS chat")
     c.execute("DROP TABLE IF EXISTS events")
+    c.execute("DROP TABLE IF EXISTS players")
     c.execute("""CREATE TABLE IF NOT EXISTS match (
     match_id INTEGER,
     game_mode TEXT,
@@ -218,10 +219,10 @@ def init():
 
     c.execute("""CREATE TABLE IF NOT EXISTS events (
     assists JSONB,
-    attacker_account_id INTEGER,
-    attacker_class TEXT,
-    attacker_class_id INTEGER,
-    attacker_entity_class TEXT,
+    killer_account_id INTEGER,
+    killer_class TEXT,
+    killer_class_id INTEGER,
+    killer_entity_class TEXT,
     killer_ability_id BIGINT,
     game_time INTEGER,
     first_blood BOOLEAN,
@@ -249,7 +250,7 @@ def init():
     PRIMARY KEY(match_id, chat_number)
     )""")
 
-    c.execute("""CREATE TABLE IF NOT EXISTS player (
+    c.execute("""CREATE TABLE IF NOT EXISTS players (
     match_ids INTEGER[],
     account_id INTEGER,
     profileurl TEXT,

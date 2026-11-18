@@ -60,7 +60,9 @@ message's tick. The `match` object contains:
 - `players`: the final metadata's player roster, including players who never
   chatted. Each entry has `uid` (the 32-bit Steam account ID, also exposed as
   `account_id` to match chat messages), `player_slot`, `team` (`2` or `3`), and
-  `lobby_team` (`0` or `1`). Unknown values are null; without final metadata the
+  `lobby_team` (`0` or `1`). `personaname` is their recorded in-match name,
+  matched by account ID (including players who never chatted), not a live Steam
+  profile lookup. Unknown values are null; without final metadata the
   roster is empty. Spectators/unknown teams retain their raw `lobby_team`, with
   `team` set to null. Each player also includes final `kills`, `deaths`, and
   `assists` from the scoreboard, plus `class` and `class_id` for their character.

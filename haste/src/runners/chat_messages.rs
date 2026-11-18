@@ -23,6 +23,7 @@ const PAWN: u64 = fxhash::hash_bytes(b"CCitadelPlayerPawn");
 const RULES: u64 = fxhash::hash_bytes(b"CCitadelGameRulesProxy");
 const PLAYER_SLOT: u64 = fkey_from_path(&["m_unLobbyPlayerSlot"]);
 const PLAYER_STEAM_ID: u64 = fkey_from_path(&["m_steamID"]);
+const PLAYER_NAME: u64 = fkey_from_path(&["m_iszPlayerName"]);
 const PLAYER_TEAM: u64 = fkey_from_path(&["m_iTeamNum"]);
 const PLAYER_HERO: u64 = fkey_from_path(&["m_PlayerDataGlobal", "m_nHeroID"]);
 const PLAYER_SOULS: u64 = fkey_from_path(&["m_PlayerDataGlobal", "m_iGoldNetWorth"]);
@@ -116,6 +117,7 @@ fn hero_snapshot(ctx: &Context, tick: i32, samples: &HeroSnapshots) -> Option<He
 #[derive(Default)]
 struct ChatVisitor {
     messages: Vec<Value>,
+    player_names: BTreeMap<u32, String>,
     events: Vec<Value>,
     entity_names: BTreeMap<u64, String>,
     heroes: HeroSnapshots,
@@ -135,6 +137,23 @@ struct PlayerBuild {
 }
 
 impl ChatVisitor {
+    fn remember_names(ctx: &Context, names: &mut BTreeMap<u32, String>) {
+        if let Some(table) = ctx
+            .string_tables()
+            .and_then(|tables| tables.find_table("userinfo"))
+        {
+            for (_, item) in table.items() {
+                if let Some(bytes) = item.get_user_data()
+                    && let Ok(info) = CMsgPlayerInfo::decode(bytes)
+                    && let Some(id) = info.steamid.or(info.xuid).and_then(account_id)
+                    && let Some(name) = info.name.filter(|name| !name.is_empty())
+                {
+                    names.insert(id, name);
+                }
+            }
+        }
+    }
+
     fn record(&mut self, ctx: &Context, chat: CCitadelUserMsgChatMsg) {
         let slot = chat.player_slot;
         let user_info = slot.and_then(|slot| {
@@ -242,6 +261,16 @@ impl Visitor for ChatVisitor {
         _delta_header: DeltaHeader,
         entity: &Entity,
     ) -> Result<(), Self::Error> {
+        if entity.serializer_name_heq(CONTROLLER)
+            && let Some(id) = entity
+                .get_value::<u64>(&PLAYER_STEAM_ID)
+                .and_then(account_id)
+            && let Some(name) = entity
+                .get_value::<String>(&PLAYER_NAME)
+                .filter(|name| !name.is_empty())
+        {
+            self.player_names.insert(id, name);
+        }
         if entity.serializer_name_heq(PAWN)
             && let Some(handle) = entity.get_value::<u32>(&PAWN_CONTROLLER)
             && is_ehandle_valid(handle)
@@ -275,6 +304,12 @@ impl Visitor for ChatVisitor {
             self.heroes.observe(snapshot);
         }
         self.last_tick = Some(header.tick);
+        if matches!(
+            header.cmd,
+            EDemoCommands::DemFullPacket | EDemoCommands::DemStop
+        ) {
+            Self::remember_names(ctx, &mut self.player_names);
+        }
         if header.cmd == EDemoCommands::DemFileHeader {
             let header = CDemoFileHeader::decode(data).map_err(io::Error::other)?;
             self.game_build = header.build_num;
@@ -342,6 +377,10 @@ pub fn run<R: Read + Seek>(
         },
     )?;
     parser.run_to_end()?;
+    // Cache the final userinfo state, including demos ending without DEM_Stop.
+    let mut names = BTreeMap::new();
+    ChatVisitor::remember_names(parser.context(), &mut names);
+    parser.visitor_mut().player_names.extend(names);
     let mut heroes = std::mem::take(&mut parser.visitor_mut().heroes);
     if let Some(snapshot) = hero_snapshot(parser.context(), parser.context().tick(), &heroes) {
         heroes.observe(snapshot);
@@ -367,6 +406,11 @@ pub fn run<R: Read + Seek>(
     summary["character_game_time"] = json!(characters.map(|snapshot| snapshot.game_time));
     if let Some(players) = summary["players"].as_array_mut() {
         for (player_json, player) in players.iter_mut().zip(&info.players) {
+            player_json["personaname"] = json!(
+                player
+                    .account_id
+                    .and_then(|id| visitor.player_names.get(&id))
+            );
             let class_id = characters
                 .and_then(|snapshot| snapshot.class_id(player.account_id, player.player_slot));
             player_json["class_id"] = json!(class_id);
