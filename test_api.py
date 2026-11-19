@@ -19,10 +19,11 @@ def dothing(matchid):
         if output and output[0]: 
             print("failed here - already questioned")
             return (matchid,False)
-        r = requests.get(f"https://api.deadlock-api.com/v1/matches/{matchid}/salts")
+        r = requests.get(f"https://api.deadlock-api.com/v1/matches/{matchid}/salts",params={"disable_steam":"true"})
         if r.status_code == 429 or r.status_code == 500:
             return (matchid,True)
         if "application/json" not in r.headers.get("Content-Type", ""):
+            print(r.text)
             print("salt failed for",matchid)
             return matchid
         print("got salt",matchid)
@@ -38,21 +39,24 @@ def dothing(matchid):
         payload = {"url": url, "run": ["deadlock-chat-messages"]}
         print("downloading / parsing demo")
         try:
-            if random.randint(0,1):
-                try:
-                    request = requests.post("http://100.95.78.79:80/parse", 
-                                    json=payload,
-                                    headers={"Content-Type": "application/json"})
-                except:
+            if random.randint(0,1) and False:
+                # try:
+                #     print("doing dis")
+                #     request = requests.post("http://100.95.78.79:80/parse", 
+                #                     json=payload,
+                #                     headers={"Content-Type": "application/json"})
+                # except:
+                #     print("doing dat")
                     request = requests.post("http://haste:80/parse", 
                                     json=payload,
                                     headers={"Content-Type": "application/json"})
         
             else:
                 request = requests.post("http://haste:80/parse", 
-                                json=payload,
+                                json=payload,  timeout=300,
                                 headers={"Content-Type": "application/json"})
         except:
+            traceback.print_exc()
             return (matchid,True)
         
         print("Parsed demo",matchid,"in",f"{time.time()-now:.3f} seconds")
@@ -74,36 +78,38 @@ def dothingparttwo(matchid):
     with open("xyz.json","r") as f:
         return json.load(f)
 
+def getnewgames():
+
+    with querywrapper() as query:
+        query.execute("SELECT match_id FROM match WHERE parsedcorrectly = false ORDER BY match_id LIMIT 1000")
+        unfinisheddownloads = query.fetchall()
+        if not unfinisheddownloads:
+            query.execute("SELECT match_id FROM match WHERE parsedcorrectly = true ORDER BY match_id DESC LIMIT 1")
+            output = query.fetchone()
+            mostrecentmatchid = output and output[0] or 138067450 or 138067446
+            print(output)
+            print(mostrecentmatchid,"mostrecent")
+    if len(unfinisheddownloads) < 10:
+        print("doing new matches")
+        r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":10000,"format":"json","order_direction":"asc","min_match_id":mostrecentmatchid,"max_unix_timestamp":int(time.time()-3600*5)})
+    else:
+        print("redoing broken matches")
+        r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":10000,"format":"json","order_direction":"asc","match_ids":",".join(list(map(lambda x: str(x[0]),unfinisheddownloads)))})
+    print("pulled matches")
+    if "application/json" not in r.headers.get("Content-Type", ""):
+        print(r.text)
+        print("failed to parse match metadata")
+        time.sleep(60)
+    yield from list(map(lambda x: x["match_id"],r.json()))
+
+
+
 def main():
     while True:
-        with querywrapper() as query:
-            query.execute("SELECT match_id FROM match WHERE parsedcorrectly = false ORDER BY match_id LIMIT 1000")
-            unfinisheddownloads = query.fetchall()
-            if not unfinisheddownloads:
-                query.execute("SELECT match_id FROM match WHERE parsedcorrectly = true ORDER BY match_id DESC LIMIT 1")
-                output = query.fetchone()
-                mostrecentmatchid = output and output[0] or 138067450 or 138067446
-                print(output)
-                print(mostrecentmatchid,"mostrecent")
-        if not unfinisheddownloads:
-            print("doing new matches")
-            r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":100,"format":"json","order_direction":"asc","min_match_id":mostrecentmatchid,"max_unix_timestamp":int(time.time()-3600*5)})
-        else:
-            print("redoing broken matches")
-            r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":1000,"format":"json","order_direction":"asc","match_ids":",".join(list(map(lambda x: str(x[0]),unfinisheddownloads)))})
-
-        # print(json.dumps(r.json(),indent=4))
-        print("pulled matches")
-        if "application/json" not in r.headers.get("Content-Type", ""):
-            print(r.text)
-            print("failed to parse match metadata")
-            time.sleep(60)
-            
-            continue
         with ThreadPoolExecutor(max_workers=12) as executor:
             games = [
                 executor.submit(dothing, i)
-                for i in map(lambda x: x["match_id"],r.json())
+                for i in getnewgames()
             ]
 
             for i, game in enumerate(as_completed(games)):

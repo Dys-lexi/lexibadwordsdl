@@ -1,13 +1,17 @@
 use std::io::Write;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::Router;
-use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode};
+use axum::body::{Body, Bytes, to_bytes};
+use axum::http::{HeaderMap, Request, StatusCode, header};
+use axum::response::IntoResponse;
 use axum::routing::get;
 use haste::service::{Config, router};
 use haste::valveprotos::common::{
     CDemoClassInfo, CDemoFullPacket, CDemoPacket, CDemoStringTables, CMsgPlayerInfo,
-    CsvcMsgCreateStringTable,
+    CsvcMsgCreateStringTable, EDemoCommands,
     c_demo_string_tables::{ItemsT, TableT},
 };
 use haste::valveprotos::deadlock::{
@@ -679,221 +683,196 @@ async fn occupied_workers_reject_another_request_and_release_after_completion() 
     assert_eq!(request(app, payload).await.0, StatusCode::OK);
 }
 
-// A real TCP peer lets us send part of a body and stall without completing it.
-async fn stalled_replay_case(mode: &'static str) {
-    use std::io::{Read, Write};
-    use std::net::{TcpListener, TcpStream};
-    use std::time::Duration;
-    fn headers(stream: &mut TcpStream) -> String {
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        let mut bytes = Vec::new();
-        while !bytes.ends_with(b"\r\n\r\n") {
-            let mut byte = [0];
-            stream.read_exact(&mut byte).unwrap();
-            bytes.push(byte[0]);
-        }
-        String::from_utf8(bytes).unwrap().to_ascii_lowercase()
-    }
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let url = format!("http://{}/demo", listener.local_addr().unwrap());
-    let peer = std::thread::spawn(move || {
-        let accept = || {
-            let start = std::time::Instant::now();
-            loop {
-                match listener.accept() {
-                    Ok((stream, _)) => return stream,
-                    Err(e)
-                        if e.kind() == std::io::ErrorKind::WouldBlock
-                            && start.elapsed() < Duration::from_secs(5) =>
-                    {
-                        std::thread::sleep(Duration::from_millis(10))
-                    }
-                    Err(e) => panic!("accept: {e}"),
+async fn replay_stream_case(stall: bool) {
+    let requests = Arc::new(AtomicUsize::new(0));
+    let upstream = upstream(Router::new().route(
+        "/demo.dem.bz2",
+        get({
+            let requests = requests.clone();
+            move |headers: HeaderMap| {
+                requests.fetch_add(1, Ordering::Relaxed);
+                async move {
+                    assert_eq!(headers[header::RANGE], "bytes=0-0");
+                    // Return 200 to the probe and stream the demo in small pieces.
+                    let demo = Bytes::from(chat_demo());
+                    Body::from_stream(futures_util::stream::unfold(
+                        demo,
+                        move |mut remaining| async move {
+                            if remaining.is_empty() {
+                                return None;
+                            }
+                            if stall && remaining.len() <= 16 {
+                                std::future::pending::<()>().await;
+                            }
+                            tokio::time::sleep(Duration::from_millis(400)).await;
+                            let chunk = remaining.split_to(16.min(remaining.len()));
+                            Some((Ok::<_, std::io::Error>(chunk), remaining))
+                        },
+                    ))
                 }
             }
-        };
-        let demo = chat_demo();
-        let mut first = accept();
-        assert!(!headers(&mut first).contains("range:"));
-        let validator = if mode == "no-validator" {
-            ""
-        } else {
-            "ETag: \"demo-v1\"\r\n"
-        };
-        write!(
-            first,
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n{validator}\r\n",
-            demo.len()
-        )
-        .unwrap();
-        if mode == "healthy" {
-            for chunk in demo.chunks(8) {
-                first.write_all(chunk).unwrap();
-                std::thread::sleep(Duration::from_millis(150));
-            }
-            return;
-        }
-        first.write_all(&demo[..16]).unwrap();
-        let offset = if mode == "relative" {
-            // Sustained early speed ~20 B/s after the initial burst, then
-            // ~4 B/s: above the 1 B/s absolute floor but below 50% of baseline.
-            for byte_pair in demo[16..30].chunks(2) {
-                std::thread::sleep(Duration::from_millis(100));
-                first.write_all(byte_pair).unwrap();
-            }
-            for byte in &demo[30..34] {
-                std::thread::sleep(Duration::from_millis(200));
-                first.write_all(&[*byte]).unwrap();
-            }
-            34
-        } else if mode == "trickle" {
-            for byte in &demo[16..19] {
-                std::thread::sleep(Duration::from_millis(200));
-                first.write_all(&[*byte]).unwrap();
-            }
-            19
-        } else {
-            16
-        };
-        // Haste must close this connection itself after detecting the stall.
-        let mut byte = [0];
-        assert_eq!(first.read(&mut byte).unwrap(), 0);
-        if mode == "deadline" {
-            return;
-        }
-        let mut second = accept();
-        let request = headers(&mut second);
-        if mode == "no-validator" {
-            assert!(!request.contains("range:"));
-        } else {
-            assert!(
-                request.contains(&format!("range: bytes={offset}-\r\n")),
-                "{request}"
-            );
-            assert!(request.contains("if-range: \"demo-v1\""));
-        }
-        if matches!(mode, "exhausted" | "slow-final" | "broken-final") {
-            write!(second, "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes 16-{}/{}\r\nETag: \"demo-v1\"\r\n\r\n", demo.len()-16, demo.len()-1, demo.len()).unwrap();
-            if mode == "slow-final" {
-                // Remain below the cutoff for multiple windows, then finish.
-                second.write_all(&demo[16..17]).unwrap();
-                std::thread::sleep(Duration::from_millis(1200));
-                second.write_all(&demo[17..18]).unwrap();
-                std::thread::sleep(Duration::from_millis(1200));
-                second.write_all(&demo[18..]).unwrap();
-            } else if mode == "broken-final" {
-                // Exhausting retries still makes a broken connection an error.
-                second.write_all(&demo[16..17]).unwrap();
-            } else {
-                assert_eq!(second.read(&mut byte).unwrap(), 0);
-            }
-        } else if mode == "ignore-range" || mode == "no-validator" {
-            write!(
-                second,
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
-                demo.len()
-            )
-            .unwrap();
-            second.write_all(&demo).unwrap();
-        } else {
-            let start = if mode == "bad-range" { 15 } else { offset };
-            let total = if mode == "changed-total" {
-                demo.len() + 1
-            } else {
-                demo.len()
-            };
-            write!(second, "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{}/{total}\r\nETag: \"demo-v1\"\r\n\r\n", demo.len()-offset, demo.len()-1).unwrap();
-            let _ = second.write_all(&demo[offset..]);
-        }
-    });
-    let mut cfg = config();
-    cfg.download_speed_window_seconds = 1;
-    cfg.download_max_restarts = 1;
-    if mode == "healthy" {
-        cfg.download_min_megabits_per_second = 0.000128; // 16 bytes/second
-    }
-    if mode == "relative" {
-        cfg.download_min_megabits_per_second = 0.000008; // 1 byte/second
-        cfg.download_min_original_speed_percent = 50.0;
-    }
-    cfg.download_timeout_seconds = if mode == "deadline" { 1 } else { 5 };
+        }),
+    ))
+    .await;
     let (status, body) = request(
-        router(cfg).unwrap(),
-        json!({"url": url, "run": ["deadlock-chat-messages"]}),
+        router(Config {
+            download_read_timeout_seconds: 1,
+            ..config()
+        })
+        .unwrap(),
+        json!({"url": upstream.url, "run": ["deadlock-chat-messages"]}),
     )
     .await;
-    tokio::task::spawn_blocking(move || peer.join().unwrap())
-        .await
-        .unwrap();
-    match mode {
-        "deadline" | "exhausted" => assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}"),
-        "bad-range" | "changed-total" | "broken-final" => {
-            assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}")
-        }
-        _ => {
-            assert_eq!(status, StatusCode::OK, "{body}");
-            assert_eq!(
-                body["results"]["deadlock-chat-messages"]["chat"]
-                    .as_array()
-                    .unwrap()
-                    .len(),
-                2
-            );
-        }
+    assert_eq!(requests.load(Ordering::Relaxed), 1);
+    if stall {
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{body}");
+        assert_eq!(body["error"]["code"], "download_failed");
+    } else {
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let chat = &body["results"]["deadlock-chat-messages"]["chat"];
+        assert_eq!(chat.as_array().unwrap().len(), 2);
     }
 }
 
 #[tokio::test]
-async fn slow_download_resumes_transparently() {
-    stalled_replay_case("resume").await;
-}
-#[tokio::test]
-async fn ignored_range_restarts_without_corruption() {
-    stalled_replay_case("ignore-range").await;
-}
-#[tokio::test]
-async fn missing_validator_restarts_from_zero() {
-    stalled_replay_case("no-validator").await;
-}
-#[tokio::test]
-async fn incorrect_resume_offset_is_rejected() {
-    stalled_replay_case("bad-range").await;
-}
-#[tokio::test]
-async fn changed_resume_total_is_rejected() {
-    stalled_replay_case("changed-total").await;
-}
-#[tokio::test]
-async fn stalled_final_attempt_remains_bounded_by_total_deadline() {
-    stalled_replay_case("exhausted").await;
-}
-#[tokio::test]
-async fn download_deadline_bounds_restarts() {
-    stalled_replay_case("deadline").await;
+async fn slow_replay_keeps_streaming_past_the_read_timeout() {
+    replay_stream_case(false).await;
 }
 
 #[tokio::test]
-async fn slow_trickle_resumes_even_while_receiving_bytes() {
-    stalled_replay_case("trickle").await;
+async fn stalled_sequential_replay_times_out_after_its_last_chunk() {
+    replay_stream_case(true).await;
 }
-#[tokio::test]
-async fn healthy_transfer_across_windows_is_not_restarted() {
-    stalled_replay_case("healthy").await;
+
+async fn ranged_replay_case(padding_commands: usize, bad_range: bool, limit: usize) {
+    let demo = chat_demo();
+    let mut large_demo = demo[..16].to_vec();
+    // Leave the chat packets at the end so parsing checks the final range.
+    for _ in 0..padding_commands {
+        large_demo.extend_from_slice(&[EDemoCommands::DemCustomData as u8, 42]);
+        varint(1024 * 1024, &mut large_demo);
+        large_demo.resize(large_demo.len() + 1024 * 1024, 0);
+    }
+    large_demo.extend_from_slice(&demo[16..]);
+    let demo = Bytes::from(large_demo);
+    let total = demo.len();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let workers = Arc::new(tokio::sync::Barrier::new(8));
+    let upstream = upstream(Router::new().route(
+        "/demo.dem.bz2",
+        get({
+            let requests = requests.clone();
+            move |headers: HeaderMap| {
+                let demo = demo.clone();
+                let workers = workers.clone();
+                let range = headers
+                    .get(header::RANGE)
+                    .map(|value| value.to_str().unwrap().to_owned());
+                requests.lock().unwrap().push(range.clone());
+                async move {
+                    let Some(range) = range else {
+                        return demo.into_response();
+                    };
+                    let (start, end) = range
+                        .strip_prefix("bytes=")
+                        .unwrap()
+                        .split_once('-')
+                        .unwrap();
+                    let (start, end) = (
+                        start.parse::<usize>().unwrap(),
+                        end.parse::<usize>().unwrap(),
+                    );
+                    if end != 0 {
+                        assert_eq!(headers[header::IF_RANGE], "\"demo-v1\"");
+                        // All eight requests must start before any can return.
+                        workers.wait().await;
+                    }
+                    let reported_total = if bad_range && end == total - 1 {
+                        total + 1
+                    } else {
+                        total
+                    };
+                    (
+                        StatusCode::PARTIAL_CONTENT,
+                        [
+                            (
+                                header::CONTENT_RANGE,
+                                format!("bytes {start}-{end}/{reported_total}"),
+                            ),
+                            (header::ETAG, "\"demo-v1\"".to_owned()),
+                        ],
+                        demo.slice(start..=end),
+                    )
+                        .into_response()
+                }
+            }
+        }),
+    ))
+    .await;
+    let (status, body) = request(
+        router(Config {
+            max_download_bytes: limit,
+            download_read_timeout_seconds: 3,
+            ..config()
+        })
+        .unwrap(),
+        json!({"url": upstream.url, "run": ["deadlock-chat-messages"]}),
+    )
+    .await;
+
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests[0].as_deref(), Some("bytes=0-0"));
+    if limit < total {
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
+        assert_eq!(body["error"]["code"], "download_too_large");
+        assert_eq!(requests.len(), 1);
+        return;
+    }
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["results"]["deadlock-chat-messages"]["chat"][1]["text"],
+        "last message"
+    );
+    if total < 8 * 1024 * 1024 {
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1], None);
+        return;
+    }
+
+    let chunk_size = total.div_ceil(8);
+    let mut expected: Vec<_> = (0..8)
+        .map(|index| {
+            let start = index * chunk_size;
+            let end = (start + chunk_size).min(total) - 1;
+            Some(format!("bytes={start}-{end}"))
+        })
+        .collect();
+    if bad_range {
+        assert_eq!(requests.last(), Some(&None));
+        expected.push(None);
+    }
+    let mut actual = requests[1..].to_vec();
+    actual.sort();
+    expected.sort();
+    assert_eq!(actual, expected);
 }
 
 #[tokio::test]
-async fn slow_final_attempt_finishes_without_another_restart() {
-    stalled_replay_case("slow-final").await;
-}
-#[tokio::test]
-async fn broken_final_attempt_still_returns_an_error() {
-    stalled_replay_case("broken-final").await;
+async fn large_replay_uses_eight_ranges_and_reassembles_the_demo() {
+    ranged_replay_case(9, false, usize::MAX).await;
 }
 
 #[tokio::test]
-async fn sustained_relative_slowdown_resumes_above_absolute_floor() {
-    stalled_replay_case("relative").await;
+async fn mismatched_content_range_falls_back_to_one_full_transfer() {
+    ranged_replay_case(9, true, usize::MAX).await;
+}
+
+#[tokio::test]
+async fn small_replay_with_range_support_uses_a_single_full_transfer() {
+    ranged_replay_case(0, false, usize::MAX).await;
+}
+
+#[tokio::test]
+async fn oversized_replay_is_rejected_before_opening_range_workers() {
+    ranged_replay_case(9, false, 8 * 1024 * 1024).await;
 }

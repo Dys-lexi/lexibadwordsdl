@@ -52,6 +52,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 axum = "0.8.9"
 bzip2 = "0.6"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 zstd = "0.14"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 tokio = { workspace = true, features = ["net", "signal", "sync", "time"] }

@@ -141,11 +141,7 @@ Configuration (environment variables):
 | `MAX_DOWNLOAD_BYTES` | `536870912` | Maximum downloaded size (512 MiB) |
 | `MAX_DEMO_BYTES` | `2147483648` | Maximum decompressed size (2 GiB) |
 | `MAX_CONCURRENT_REQUESTS` | `1` | Downloads/parses allowed at once |
-| `DOWNLOAD_TIMEOUT_SECONDS` | `300` | Total download timeout across all attempts |
-| `DOWNLOAD_MIN_MEGABITS_PER_SECOND` | `8` | Reconnect below this average speed in Mbps (decimal values allowed) |
-| `DOWNLOAD_MIN_ORIGINAL_SPEED_PERCENT` | `25` | Also reconnect below this percent of sustained original speed; 0 disables this cutoff |
-| `DOWNLOAD_SPEED_WINDOW_SECONDS` | `10` | Throughput measurement window and response-header wait limit |
-| `DOWNLOAD_MAX_RESTARTS` | `8` | Maximum reconnects before accepting a slow transfer |
+| `DOWNLOAD_READ_TIMEOUT_SECONDS` | `30` | Time allowed for replay response headers or between body reads |
 | `ALLOWED_REPLAY_HOSTS` | empty | Default: `replay<number>.valve.net`; override with exact comma-separated hostnames |
 | `PORT` | `80` | Compose host port |
 | `MEMORY_LIMIT` | `4g` | Compose container memory limit |
@@ -296,24 +292,17 @@ other notable resources:
 
 and some more can probably be found across comments in the codebase.
 
-Slow or stalled replay downloads reconnect automatically within the original HTTP
-request. Each connection gets a full measurement window before its speed is
-checked. Partial bytes are resumed using `Range` and `If-Range` with a strong
-ETag (or Last-Modified); without a validator, or if the server responds with a
-full file, Haste starts from zero. Invalid resume offsets, changed totals and
-oversized files are rejected. Interrupted response bodies also trigger a
-reconnect. Reconnects use fresh connections and are logged to stderr with the
-reason, byte offset and attempt count. After the last allowed reconnect, Haste
-accepts a slow transfer and keeps reading instead of failing on speed alone.
-The overall download deadline still applies, and broken connections or invalid
-responses still fail when no reconnects remain. The worker slot stays occupied until the
-request finishes, and the total download deadline includes every attempt. The
-response format and caller API are unchanged. Set `DOWNLOAD_MIN_MEGABITS_PER_SECOND=8` in the project `.env` to use an
-8 Mbps cutoff (1 MB/s); decimal values such as `2.5` are accepted. Compose passes
-this setting to Haste. Recreate the Haste container after changing it. The other
-new settings default inside Haste; to override those in Docker, pass them through
-the service's environment.
+### Replay downloads
 
+Haste probes the replay server with a one-byte range request. Files of at least
+8 MiB use eight parallel requests when the server supports ranges. Smaller
+files and servers that reject ranges use one sequential stream. If the probe
+already returns a full response, Haste reads it directly. A failed parallel
+download falls back to one sequential request. [Deadlock API downloader](https://github.com/deadlock-api/deadlock-api/blob/master/api/src/routes/v1/matches/demo/download.rs)
+
+The connection timeout is 5 seconds and the read timeout defaults to 30 seconds.
+Each successful read resets that timeout, so a slow transfer can run as long as
+it keeps delivering data.
 
 ### Diagnostic logs
 
@@ -323,73 +312,8 @@ Haste writes one JSON object per diagnostic event to stderr. Follow them with:
 docker compose logs -f --no-log-prefix haste
 ```
 
-Every transfer event includes `download_id` (unique across attempts and process
-restarts), `match_id` (from the replay filename when available), `host`,
-`timestamp_unix_ms`, `elapsed_seconds`, `attempt` (1-based), `restarts`,
-`retained_bytes`, `received_bytes` and `total_bytes` when known. `received_bytes`
-counts response-body bytes across attempts, including bytes later discarded.
-Full replay URLs, query strings and validator values are not logged.
-
-- `download_started`: cutoff, measurement window, timeout, retry budget, and a
-  snapshot of occupied worker slots (`active_requests`).
-- `download_attempt_started` / `download_response`: resume offset, upstream HTTP
-  status, response host, header wait time, Content-Range and validator availability.
-- `download_progress`: measured Mbps and remaining bytes, once per measurement window.
-- `download_retry`: reason, next attempt, bytes received and duration of the attempt.
-- `download_retry_comparison`: `before_mbps`, `after_mbps`, `speed_ratio` and
-  `measurement_seconds`. Compares the window triggering a slow retry with the
-  next response's first window (or its shorter duration if it finishes early).
-  A ratio above 1 means the observed transfer rate improved; this does not prove
-  reconnecting caused the improvement. Header/connect time is excluded from these
-  window speeds, and brief completion samples can exaggerate the apparent gain.
-- `download_resume_reset`: why partial bytes were discarded instead of resumed.
-- `download_accepting_slow_transfer`: the retry budget is spent and the final
-  connection will continue despite its speed.
-- `download_completed`: overall useful-file Mbps (`effective_mbps`) and all received
-  body bytes per second converted to Mbps (`transfer_mbps`), including retry overhead.
-- `download_failed`: HTTP status, error code, reason and progress at failure,
-  including total-deadline failures.
-- `processing_started`, `decompression_completed`, `parsing_completed`, and
-  `request_completed`: processing durations using the same download ID. Processing
-  errors emit `processing_failed`. `request_completed` means the response was
-  constructed, not that the caller finished receiving it.
-
-To inspect only retry comparisons (with jq installed):
-
-```sh
-docker compose logs --no-log-prefix --since 1h haste |
-  jq -R 'fromjson? | select(.event == "download_retry_comparison")'
-```
-
-
-### Two speed cutoffs
-
-Set both in the project `.env`; Compose passes them through to Haste:
-
-```dotenv
-DOWNLOAD_MIN_MEGABITS_PER_SECOND=8
-DOWNLOAD_MIN_ORIGINAL_SPEED_PERCENT=25
-```
-
-A full measurement window below **either** cutoff triggers a reconnect. For
-example, an original speed of 100 Mbps gives a 25 Mbps relative cutoff, even
-though the absolute cutoff is 8 Mbps. Percentages from 0 through 100 (including
-decimals) are accepted; 0 disables the relative cutoff.
-
-Original speed is estimated separately for each download from response-body
-bytes, excluding DNS/connection/header wait time. Haste discards a warmup sample,
-then uses the median of five full samples to suppress buffered startup bursts
-and isolated peaks or dips. Samples last one tenth of the decision window:
-with the default 10-second window, that is a one-second warmup followed by five
-one-second samples. No relative decision is made until a positive baseline is
-available. Short downloads can finish before calibration; the absolute cutoff
-continues to work without a baseline. If an attempt ends before calibration,
-the next attempt starts calibration afresh. Once established, the baseline stays
-fixed across retries so slow reconnects cannot progressively lower the target.
-
-`download_baseline_established` logs the estimate and sampling method. Progress
-logs include `original_mbps`, `percent_of_original`, `original_cutoff_mbps`,
-and `slow_reason`. Retry reasons distinguish `below_minimum_mbps`,
-`below_original_speed`, and `below_both_cutoffs`. Both cutoffs share the same
-8-restart budget; after that, Haste accepts the final connection's speed.
-The overall download timeout and error handling remain in effect.
+Each event includes the download ID, match ID when available, replay host,
+timestamp, elapsed time, bytes received, and total size when known. Events show
+whether Haste used ranges or a sequential stream, why it fell back, and the
+resulting transfer speed or error. Decompression and parsing events share the
+same download ID.

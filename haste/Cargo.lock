@@ -519,6 +519,7 @@ dependencies = [
  "axum",
  "base64",
  "bzip2",
+ "futures-util",
  "haste_broadcast",
  "haste_core",
  "prost",
