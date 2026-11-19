@@ -43,6 +43,6 @@ jobs:
         uses: docker/build-push-action@v6                                                                                                                                                                                 
         with:                                                                                                                                                                                                             
           context: ./haste                                                                                                                                                                                                   
-          file: ./haste/dockerfile                                                                                                                                                                                              
+          file: ./dockerfile                                                                                                                                                                                              
           push: true                                                                                                                                                                                                      
           tags: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKERHUB_PROJECT_NAME }}:latest-${{env.BRANCH_NAME}} 
