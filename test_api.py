@@ -3,11 +3,12 @@ import requests
 import threading
 import time
 import traceback
+import random
 import functools
 from psycopg2.extras import Json
 from initsql import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
-print("start")
+print("started")
 def dothing(matchid):
     try:
         print("doing",matchid)
@@ -37,14 +38,20 @@ def dothing(matchid):
         payload = {"url": url, "run": ["deadlock-chat-messages"]}
         print("downloading / parsing demo")
         try:
-
-            request = requests.post("http://100.95.78.79:80/parse", 
-                            json=payload,
-                            headers={"Content-Type": "application/json"})
-
-            # request = requests.post("http://localhost:80/parse", 
-            #                 json=payload,
-            #                 headers={"Content-Type": "application/json"})
+            if random.randint(0,1):
+                try:
+                    request = requests.post("http://100.95.78.79:80/parse", 
+                                    json=payload,
+                                    headers={"Content-Type": "application/json"})
+                except:
+                    request = requests.post("http://haste:80/parse", 
+                                    json=payload,
+                                    headers={"Content-Type": "application/json"})
+        
+            else:
+                request = requests.post("http://haste:80/parse", 
+                                json=payload,
+                                headers={"Content-Type": "application/json"})
         except:
             return (matchid,True)
         
@@ -71,7 +78,7 @@ def main():
     while True:
         with querywrapper() as query:
             query.execute("SELECT match_id FROM match WHERE parsedcorrectly = false ORDER BY match_id LIMIT 1000")
-            unfinisheddownloads = query.fetchall() and []
+            unfinisheddownloads = query.fetchall()
             if not unfinisheddownloads:
                 query.execute("SELECT match_id FROM match WHERE parsedcorrectly = true ORDER BY match_id DESC LIMIT 1")
                 output = query.fetchone()
