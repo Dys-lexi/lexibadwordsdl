@@ -1,0 +1,14 @@
+db/
+venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.claude/
+*.md
+dump/
+db/
+venv/
+.git/
+lexifront/
+sveltelexi/

@@ -163,22 +163,24 @@ impl ChatVisitor {
         });
         let user_account_id = user_info
             .as_ref()
-            .and_then(|info| info.steamid)
-            .and_then(account_id);
+            .and_then(|info| info.steamid.or(info.xuid))
+            .and_then(account_id)
+            .filter(|id| *id != 0);
 
         let entities = ctx.entities();
         let controller = entities.and_then(|entities| {
+            let sender = user_account_id?;
+            // Chat slots index userinfo, not m_unLobbyPlayerSlot. Joining those
+            // slots can select another player's stats (or no controller at all).
             entities.iter().map(|(_, entity)| entity).find(|entity| {
                 entity.serializer_name_heq(CONTROLLER)
-                    && slot.is_some()
-                    && entity.get_value::<u8>(&PLAYER_SLOT).map(i32::from) == slot
+                    && entity
+                        .get_value::<u64>(&PLAYER_STEAM_ID)
+                        .and_then(account_id)
+                        == Some(sender)
             })
         });
-        let account_id = user_account_id.or_else(|| {
-            controller
-                .and_then(|entity| entity.get_value::<u64>(&PLAYER_STEAM_ID))
-                .and_then(account_id)
-        });
+        let account_id = user_account_id;
         let team = controller.and_then(|entity| entity.get_value::<u8>(&PLAYER_TEAM));
         let class_id = controller.and_then(|entity| entity.get_value::<u32>(&PLAYER_HERO));
         let class = class_id.and_then(|id| self.hero_classes.get(&id));

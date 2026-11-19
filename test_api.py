@@ -37,9 +37,14 @@ def dothing(matchid):
         payload = {"url": url, "run": ["deadlock-chat-messages"]}
         print("downloading / parsing demo")
         try:
-            request = requests.post("http://localhost:80/parse", 
+
+            request = requests.post("http://100.95.78.79:80/parse", 
                             json=payload,
                             headers={"Content-Type": "application/json"})
+
+            # request = requests.post("http://localhost:80/parse", 
+            #                 json=payload,
+            #                 headers={"Content-Type": "application/json"})
         except:
             return (matchid,True)
         
@@ -66,7 +71,7 @@ def main():
     while True:
         with querywrapper() as query:
             query.execute("SELECT match_id FROM match WHERE parsedcorrectly = false ORDER BY match_id LIMIT 1000")
-            unfinisheddownloads = query.fetchall()
+            unfinisheddownloads = query.fetchall() and []
             if not unfinisheddownloads:
                 query.execute("SELECT match_id FROM match WHERE parsedcorrectly = true ORDER BY match_id DESC LIMIT 1")
                 output = query.fetchone()
@@ -88,7 +93,7 @@ def main():
             time.sleep(60)
             
             continue
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=12) as executor:
             games = [
                 executor.submit(dothing, i)
                 for i in map(lambda x: x["match_id"],r.json())
@@ -117,7 +122,7 @@ def parsegame(game,i):
         print("could not parse",game)
         if game[1]:
             with querywrapper() as query:
-                query.execute("INSERT INTO match (match_id,parsedcorrectly) VALUES (%s,%s)",(game[0],False))
+                query.execute("INSERT INTO match (match_id,parsedcorrectly) VALUES (%s,%s) ON CONFLICT DO NOTHING",(game[0],False))
                 query.commit()
         return
     game = game["results"]["deadlock-chat-messages"]

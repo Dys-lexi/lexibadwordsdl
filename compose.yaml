@@ -11,6 +11,8 @@ services:
       MAX_DEMO_BYTES: "${MAX_DEMO_BYTES:-2147483648}"
       MAX_CONCURRENT_REQUESTS: "${MAX_CONCURRENT_REQUESTS:-1}"
       DOWNLOAD_TIMEOUT_SECONDS: "${DOWNLOAD_TIMEOUT_SECONDS:-300}"
+      DOWNLOAD_MIN_MEGABITS_PER_SECOND: "${DOWNLOAD_MIN_MEGABITS_PER_SECOND:-8}"
+      DOWNLOAD_MIN_ORIGINAL_SPEED_PERCENT: "${DOWNLOAD_MIN_ORIGINAL_SPEED_PERCENT:-25}"
       ALLOWED_REPLAY_HOSTS: "${ALLOWED_REPLAY_HOSTS:-}"
     mem_limit: "${MEMORY_LIMIT:-4g}"
     restart: unless-stopped
@@ -73,4 +75,24 @@ services:
       - ./db:/var/lib/postgresql/data
       # - /mnt/bigdrives/tflogs/logs.sql:/var/logs.sql
       # - ./dump:/var/bvmountIonlyhavelike7terrabytesofstoragepleasebekindtomethankyouloveyou
+    restart: unless-stopped
+  update:
+    build:
+      context: ./
+      dockerfile: ./dockerfile
+    depends_on:
+        postgres:
+          condition: service_started
+    volumes:
+      # - ./fonts:/app/fonts:ro
+      # - ./search.py:/app/search.py:ro
+      # - ./tempurature.py:/app/tempurature.py:ro
+      - ./test_api.py:/app/test_api.py:ro
+      - ./initsql.py:/app/initsql.py:ro
+      # - ./statscache.json:/app/statscache.json:rw
+      # - ./slurcloud.py:/app/slurcloud.py:ro
+      # - ./chatfilters:/app/chatfilters:ro
+      # - ./wordcloud:/app/wordcloud:ro
+    # env_file:
+      # - ./.env
     restart: unless-stopped

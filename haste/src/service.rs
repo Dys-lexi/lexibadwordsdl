@@ -16,12 +16,18 @@ use tokio::sync::Semaphore;
 
 use crate::runners::{self, Runner};
 
+mod download;
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub max_download_bytes: usize,
     pub max_demo_bytes: usize,
     pub max_concurrent_requests: usize,
     pub download_timeout_seconds: u64,
+    pub download_min_megabits_per_second: f64,
+    pub download_min_original_speed_percent: f64,
+    pub download_speed_window_seconds: u64,
+    pub download_max_restarts: usize,
     /// Empty means only replay<number>.valve.net. Overrides are exact hostnames.
     pub allowed_replay_hosts: Vec<String>,
 }
@@ -33,6 +39,10 @@ impl Default for Config {
             max_demo_bytes: 2 * 1024 * 1024 * 1024,
             max_concurrent_requests: 1,
             download_timeout_seconds: 300,
+            download_min_megabits_per_second: 8.0,
+            download_min_original_speed_percent: 25.0,
+            download_speed_window_seconds: 10,
+            download_max_restarts: 8,
             allowed_replay_hosts: Vec::new(),
         }
     }
@@ -60,6 +70,44 @@ impl Config {
                 defaults.max_concurrent_requests,
             )?,
             download_timeout_seconds: positive("DOWNLOAD_TIMEOUT_SECONDS", 300)? as u64,
+            download_min_megabits_per_second: match std::env::var(
+                "DOWNLOAD_MIN_MEGABITS_PER_SECOND",
+            ) {
+                Ok(value) => value
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| n.is_finite() && *n > 0.0)
+                    .ok_or_else(|| {
+                        io::Error::other(
+                            "DOWNLOAD_MIN_MEGABITS_PER_SECOND must be a positive finite number",
+                        )
+                    })?,
+                Err(std::env::VarError::NotPresent) => defaults.download_min_megabits_per_second,
+                Err(error) => return Err(io::Error::other(error)),
+            },
+            download_min_original_speed_percent: match std::env::var(
+                "DOWNLOAD_MIN_ORIGINAL_SPEED_PERCENT",
+            ) {
+                Ok(value) => value
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| n.is_finite() && (0.0..=100.0).contains(n))
+                    .ok_or_else(|| {
+                        io::Error::other(
+                            "DOWNLOAD_MIN_ORIGINAL_SPEED_PERCENT must be between 0 and 100",
+                        )
+                    })?,
+                Err(std::env::VarError::NotPresent) => defaults.download_min_original_speed_percent,
+                Err(error) => return Err(io::Error::other(error)),
+            },
+            download_speed_window_seconds: positive(
+                "DOWNLOAD_SPEED_WINDOW_SECONDS",
+                defaults.download_speed_window_seconds as usize,
+            )? as u64,
+            download_max_restarts: positive(
+                "DOWNLOAD_MAX_RESTARTS",
+                defaults.download_max_restarts,
+            )?,
             allowed_replay_hosts: std::env::var("ALLOWED_REPLAY_HOSTS")
                 .unwrap_or_default()
                 .split(',')
@@ -109,7 +157,7 @@ impl ApiError {
         } else {
             StatusCode::BAD_GATEWAY
         };
-        Self::new(status, "download_failed", error.to_string())
+        Self::new(status, "download_failed", error.without_url().to_string())
     }
 }
 
@@ -150,8 +198,9 @@ pub fn router(config: Config) -> Result<Router, reqwest::Error> {
     let hosts = config.allowed_replay_hosts.clone();
     let client = Client::builder()
         .user_agent("haste-demo-service/0.1")
+        // Connection: close must create a fresh TCP connection on each retry.
+        .http1_only()
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(config.download_timeout_seconds))
         .no_gzip()
         .no_brotli()
         .no_deflate()
@@ -245,63 +294,52 @@ async fn parse(
             "all demo workers are busy; retry later",
         )
     })?;
-    let mut response = state
-        .client
-        .get(url)
-        .header(header::ACCEPT_ENCODING, "identity")
-        .send()
-        .await
-        .map_err(ApiError::upstream)?;
-    if !response.status().is_success() {
-        return Err(ApiError::new(
-            StatusCode::BAD_GATEWAY,
-            "download_failed",
-            format!("replay server returned HTTP {}", response.status()),
-        ));
-    }
-    let limit = state.config.max_download_bytes;
-    if response
-        .content_length()
-        .is_some_and(|size| size > limit as u64)
-    {
-        return Err(ApiError::new(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "download_too_large",
-            "compressed demo exceeds MAX_DOWNLOAD_BYTES",
-        ));
-    }
-    let mut compressed = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(ApiError::upstream)? {
-        if chunk.len() > limit.saturating_sub(compressed.len()) {
-            return Err(ApiError::new(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "download_too_large",
-                "compressed demo exceeds MAX_DOWNLOAD_BYTES",
-            ));
-        }
-        compressed.extend_from_slice(&chunk);
-    }
+    let (compressed, download_log) = download::download(
+        &state.client,
+        url,
+        &state.config,
+        state.config.max_concurrent_requests - state.slots.available_permits(),
+    )
+    .await?;
     let config = Arc::clone(&state.config);
     // The permit stays with the actual worker even if its HTTP client disconnects.
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let demo = decompress(compressed, config.max_demo_bytes)?;
-        let results =
-            runners::analyze(&demo, &request.run, request.match_start_unix).map_err(|error| {
+        let processing_start = std::time::Instant::now();
+        download_log.event("processing_started", json!({}));
+        let result: Result<Response, ApiError> = (|| {
+            let demo = decompress(compressed, config.max_demo_bytes)?;
+            download_log.event("decompression_completed", json!({
+                "decompressed_bytes": demo.len(),
+                "decompression_seconds": processing_start.elapsed().as_secs_f64(),
+            }));
+            let parse_start = std::time::Instant::now();
+            let results =
+                runners::analyze(&demo, &request.run, request.match_start_unix).map_err(|error| {
+                    ApiError::new(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "parse_failed",
+                        error.to_string(),
+                    )
+                })?;
+            download_log.event("parsing_completed", json!({"parse_seconds": parse_start.elapsed().as_secs_f64()}));
+            let body = serde_json::to_string_pretty(&json!({"results": results})).map_err(|error| {
                 ApiError::new(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "parse_failed",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "serialization_failed",
                     error.to_string(),
                 )
             })?;
-        let body = serde_json::to_string_pretty(&json!({"results": results})).map_err(|error| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "serialization_failed",
-                error.to_string(),
-            )
-        })?;
-        Ok(([(header::CONTENT_TYPE, "application/json")], body).into_response())
+            Ok(([(header::CONTENT_TYPE, "application/json")], body).into_response())
+        })();
+        match &result {
+            Ok(_) => download_log.event("request_completed", json!({"processing_seconds": processing_start.elapsed().as_secs_f64()})),
+            Err(error) => download_log.event("processing_failed", json!({
+                "http_status": error.status.as_u16(), "error_code": error.code, "reason": error.message,
+                "processing_seconds": processing_start.elapsed().as_secs_f64(),
+            })),
+        }
+        result
     })
     .await
     .map_err(|error| {
