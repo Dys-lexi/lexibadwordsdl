@@ -9,6 +9,22 @@ from psycopg2.extras import Json
 from initsql import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
 print("started")
+lock = threading.Lock()
+lexiesiplist = {"http://haste:80":False,"http://100.95.78.79:80":False}
+
+def checkifworking():
+    global lexiesiplist
+    print("checking ips")
+    with lock:
+        duplicate = dict(lexiesiplist)
+    for thing in duplicate:
+        try:
+            r = requests.get(f"{thing}/health",timeout=10)
+            with lock:
+                lexiesiplist[thing] = r.ok()
+        except:
+            lexiesiplist[thing] = False
+
 def dothing(matchid):
     try:
         print("doing",matchid)
@@ -39,21 +55,15 @@ def dothing(matchid):
         payload = {"url": url, "run": ["deadlock-chat-messages"]}
         print("downloading / parsing demo")
         try:
-            if random.randint(0,1) and False:
-                # try:
-                #     print("doing dis")
-                #     request = requests.post("http://100.95.78.79:80/parse", 
-                #                     json=payload,
-                #                     headers={"Content-Type": "application/json"})
-                # except:
-                #     print("doing dat")
-                    request = requests.post("http://haste:80/parse", 
-                                    json=payload,
-                                    headers={"Content-Type": "application/json"})
-        
-            else:
+            try:
+                print("doing dis")
+                request = requests.post(f"{random.choice(list(map(lambda x: x[0],filter(lambda x: x[1],lexiesiplist.items()))))}/parse", 
+                                json=payload,
+                                headers={"Content-Type": "application/json"})
+            except:
+                print("doing dat")
                 request = requests.post("http://haste:80/parse", 
-                                json=payload,  timeout=300,
+                                json=payload,
                                 headers={"Content-Type": "application/json"})
         except:
             traceback.print_exc()
@@ -78,12 +88,14 @@ def dothingparttwo(matchid):
     with open("xyz.json","r") as f:
         return json.load(f)
 
+
+
 def getnewgames():
 
     with querywrapper() as query:
         query.execute("SELECT match_id FROM match WHERE parsedcorrectly = false ORDER BY match_id LIMIT 1000")
         unfinisheddownloads = query.fetchall()
-        if not unfinisheddownloads:
+        if len(unfinisheddownloads) < 10:
             query.execute("SELECT match_id FROM match WHERE parsedcorrectly = true ORDER BY match_id DESC LIMIT 1")
             output = query.fetchone()
             mostrecentmatchid = output and output[0] or 138067450 or 138067446
@@ -102,9 +114,13 @@ def getnewgames():
         time.sleep(60)
     yield from list(map(lambda x: x["match_id"],r.json()))
 
-
-
+def checkifworkingstometimes():
+    while True:
+        time.sleep(120)
+        checkifworking()
 def main():
+    checkifworking()
+    threading.Thread(target=checkifworkingstometimes, daemon=True).start()
     while True:
         with ThreadPoolExecutor(max_workers=12) as executor:
             games = [
