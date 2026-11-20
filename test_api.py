@@ -16,18 +16,21 @@ lexiesiplist = {"http://haste:80":{"healthy":False,"maxrequests":0},"http://100.
 running_tasks = {server: [] for server in lexiesiplist}
 
 
-def checkifworking():
+def checkifworking(firstime = False):
     for server in lexiesiplist:
         try:
-            healthy = requests.get(f"{server}/health", timeout=10)
+            healthy = requests.get(f"{server}/health", timeout=5)
         except requests.RequestException:
             healthy = False
         with lock:
             # if healthy:
+                # print(server,healthy.ok, healthy.json().get("max_concurrent_requests",12))
                 # print({"healthy":healthy and healthy.ok,"maxrequests":(healthy or 0) and healthy.json().get("max_concurrent_requests",12)})
                 # print(healthy.json().get("max_concurrent_requests",12))
+            
             lexiesiplist[server] = {"healthy":healthy and healthy.ok,"maxrequests":(healthy or 0) and (healthy.ok or 0 ) and healthy.json().get("max_concurrent_requests",12)}
-    print(json.dumps(lexiesiplist,indent=4))
+    if firstime:
+        print(json.dumps(lexiesiplist,indent=4))
 
 
 def parse_on_backend(matchid, payload):
@@ -37,6 +40,7 @@ def parse_on_backend(matchid, payload):
             candidates = [server for server, healthy in lexiesiplist.items()
                           if healthy["healthy"] and server not in attempted]
             if not candidates:
+                # time.sleep(300)
                 break
             random.shuffle(candidates)  # Spread requests evenly when counts are tied.
             server = max(candidates, key=lambda url: lexiesiplist[url]["maxrequests"] - len(running_tasks[url]))
@@ -54,6 +58,8 @@ def parse_on_backend(matchid, payload):
                 return (matchid,True)
             if response.status_code == 503 and result.get("error", {}).get("code") == "busy":
                 print("backend busy", server, "match", matchid)
+                with lock:
+                    lexiesiplist[server]["healthy"] = False
                 continue
             if "results" in result:
                 return result
@@ -66,6 +72,7 @@ def parse_on_backend(matchid, payload):
         finally:
             with lock:
                 running_tasks[server].remove(matchid)
+            time.sleep(1)
 
     print("no available backend for match", matchid)
     return (matchid, True)
@@ -78,6 +85,10 @@ def dothing(matchid):
         with querywrapper() as query:
             query.execute("SELECT parsedcorrectly FROM match WHERE match_id = %s LIMIT 1",(matchid,))
             output = query.fetchone()
+            if not output or not output[0]:
+                query.execute("DELETE FROM match WHERE match_id = %s",(matchid,))
+                query.execute("INSERT INTO match (match_id,parsedcorrectly) VALUES (%s,%s)",(matchid,False))
+                query.commit()
         if output and output[0]: 
             print("failed here - already questioned")
             return (matchid,False)
@@ -92,6 +103,9 @@ def dothing(matchid):
 
         if "demo_url" in r.json() and not r.json()["demo_url"]:
             print("failed here2",r.text)
+            with querywrapper() as query:
+                query.execute("INSERT INTO match (match_id,parsedcorrectly) VALUES (%s,%s) ON CONFLICT (match_id) DO UPDATE SET parsedcorrectly = %s",(matchid,True,True))
+                query.commit()
             return (matchid,False)
         elif "demo_url" not in r.json():
             return (matchid,True)
@@ -102,6 +116,10 @@ def dothing(matchid):
         result = parse_on_backend(matchid, payload)
         if isinstance(result, dict):
             print("Parsed demo", matchid, "in", f"{time.time()-now:.3f} seconds")
+        else:
+            with querywrapper() as query:
+                query.execute("INSERT INTO match (match_id,parsedcorrectly) VALUES (%s,%s) ON CONFLICT (match_id) DO UPDATE SET parsedcorrectly = %s",(matchid,True,True))
+                query.commit()
         return result
     except Exception:
         traceback.print_exc()
@@ -127,10 +145,10 @@ def getnewgames():
             print(mostrecentmatchid,"mostrecent")
     if len(unfinisheddownloads) < 10:
         print("doing new matches")
-        r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":10000,"format":"json","order_direction":"asc","min_match_id":mostrecentmatchid,"max_unix_timestamp":int(time.time()-3600*5)})
+        r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":1000,"format":"json","order_direction":"asc","min_match_id":mostrecentmatchid,"max_unix_timestamp":int(time.time()-3600*5)})
     else:
         print("redoing broken matches")
-        r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":10000,"format":"json","order_direction":"asc","match_ids":",".join(list(map(lambda x: str(x[0]),unfinisheddownloads)))})
+        r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":1000,"format":"json","order_direction":"asc","match_ids":",".join(list(map(lambda x: str(x[0]),unfinisheddownloads)))})
     print("pulled matches")
     if "application/json" not in r.headers.get("Content-Type", ""):
         print(r.text)
@@ -140,10 +158,10 @@ def getnewgames():
 
 def checkifworkingstometimes():
     while True:
-        time.sleep(120)
+        time.sleep(20)
         checkifworking()
 def main():
-    checkifworking()
+    checkifworking(firstime=True)
     time.sleep(5)
     threading.Thread(target=checkifworkingstometimes, daemon=True).start()
     while True:
