@@ -33,52 +33,49 @@ def checkifworking(firstime = False):
         print(json.dumps(lexiesiplist,indent=4))
 
 
-def parse_on_backend(matchid, payload):
-    attempted = set()
-    while True:
-        with lock:
-            candidates = [server for server, healthy in lexiesiplist.items()
-                          if healthy["healthy"] and server not in attempted]
-            if not candidates:
-                time.sleep(30)
-                break
-            random.shuffle(candidates)  # Spread requests evenly when counts are tied.
-            server = max(candidates, key=lambda url: lexiesiplist[url]["maxrequests"] - len(running_tasks[url]))
-            running_tasks[server].append(matchid)
-            active = len(running_tasks[server])
+def parse_on_backend(matchid, payload,server):
+    # attempted = set()
+    # # while True:
+        # with lock:
+        #     candidates = [server for server, healthy in lexiesiplist.items()
+        #                   if healthy["healthy"] and server not in attempted]
+        #     if not candidates:
+        #         time.sleep(30)
+        #         break
+        #     random.shuffle(candidates)  # Spread requests evenly when counts are tied.
+        #     server = max(candidates, key=lambda url: lexiesiplist[url]["maxrequests"] - len(running_tasks[url]))
+        #     running_tasks[server].append(matchid)
+        #     active = len(running_tasks[server])
 
+    try:
+        #     attempted.add(server)
+    # print("parsing match", matchid, "on", server)
+        print("asking haste for",matchid)
+        response = requests.post(f"{server}/parse", json=payload, timeout=(5, None))
+        # print(response.text)
         try:
-            attempted.add(server)
-            print("parsing match", matchid, "on", server, "active parses", active)
-            response = requests.post(f"{server}/parse", json=payload, timeout=(5, None))
-            # print(response.text)
-            try:
-                result = response.json()
-            except:
-                return (matchid,True)
-            if response.status_code == 503 and result.get("error", {}).get("code") == "busy":
-                print("backend busy", server, "match", matchid)
-                with lock:
-                    lexiesiplist[server]["healthy"] = False
-                continue
-            if "results" in result:
-                return result
-            print("parse failed", matchid, server, result)
-            return (matchid, True)
-        except requests.ConnectionError as error:
+            result = response.json()
+        except:
+            return (matchid,True)
+        if response.status_code == 503 and result.get("error", {}).get("code") == "busy":
+            print("backend busy", server, "match", matchid)
             with lock:
                 lexiesiplist[server]["healthy"] = False
-            print("backend unavailable", server, "match", matchid, error)
-        finally:
-            with lock:
-                running_tasks[server].remove(matchid)
-            time.sleep(1)
+            return (matchid,True)
+        if "results" in result:
+            return result
+        print("parse failed", matchid, server, result)
+        return (matchid, True)
+    except requests.ConnectionError as error:
+        with lock:
+            lexiesiplist[server]["healthy"] = False
+        print("backend unavailable", server, "match", matchid, error)
+        return (matchid, True)
+    # print("no available backend for match", matchid)
+    # return (matchid, True)
 
-    print("no available backend for match", matchid)
-    return (matchid, True)
 
-
-def dothing(matchid):
+def dothing(matchid,server):
     try:
         print("doing",matchid)
         now = time.time()
@@ -113,7 +110,7 @@ def dothing(matchid):
         url = r.json()["demo_url"]
         
         payload = {"url": url, "run": ["deadlock-chat-messages"]}
-        result = parse_on_backend(matchid, payload)
+        result = parse_on_backend(matchid, payload,server)
         if isinstance(result, dict):
             print("Parsed demo", matchid, "in", f"{time.time()-now:.3f} seconds")
         else:
@@ -160,6 +157,24 @@ def checkifworkingstometimes():
     while True:
         time.sleep(20)
         checkifworking()
+
+def chooseandwaitforaserver(matchid):
+    with lock:
+        server = max(lexiesiplist,key = lambda x: lexiesiplist[x]["maxrequests"]*int(lexiesiplist[x]["healthy"]) - len(running_tasks[x]))
+        while lexiesiplist[server]["maxrequests"] - len(running_tasks[server]) <= 0:
+            server = max(lexiesiplist,key = lambda x: lexiesiplist[x]["maxrequests"]*int(lexiesiplist[x]["healthy"]) - len(running_tasks[x]))
+            print("waiting on slot avaialble :(",lexiesiplist[server]["maxrequests"] - len(running_tasks[server]))
+        running_tasks[server].append(matchid)
+        print(f"doing {matchid} on {server} ({lexiesiplist[server]["maxrequests"] - len(running_tasks[server])} slots left)")
+    output = (matchid,True)
+    try:
+        output = dothing(matchid,server)
+    except:
+        traceback.print_exc()
+    with lock:
+        running_tasks[server].remove(matchid)
+    return output
+
 def main():
     checkifworking(firstime=True)
     time.sleep(5)
@@ -167,9 +182,9 @@ def main():
     while True:
         thing = lexiesiplist.copy()
         # print(list(thing.values()))
-        with ThreadPoolExecutor(max_workers=(sum(list(map(lambda x:x["maxrequests"]*int(x["healthy"]),list(thing.values())))))-2) as executor:
+        with ThreadPoolExecutor(max_workers=(sum(list(map(lambda x:x["maxrequests"]*int(x["healthy"]),list(thing.values())))))) as executor:
             games = [
-                executor.submit(dothing, i)
+                executor.submit(chooseandwaitforaserver, i)
                 for i in getnewgames()
             ]
 
