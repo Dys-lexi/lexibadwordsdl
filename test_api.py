@@ -40,7 +40,7 @@ def parse_on_backend(matchid, payload):
             candidates = [server for server, healthy in lexiesiplist.items()
                           if healthy["healthy"] and server not in attempted]
             if not candidates:
-                # time.sleep(300)
+                time.sleep(30)
                 break
             random.shuffle(candidates)  # Spread requests evenly when counts are tied.
             server = max(candidates, key=lambda url: lexiesiplist[url]["maxrequests"] - len(running_tasks[url]))
@@ -98,7 +98,7 @@ def dothing(matchid):
         if "application/json" not in r.headers.get("Content-Type", ""):
             print(r.text)
             print("salt failed for",matchid)
-            return matchid
+            return (matchid, True)
         print("got salt",matchid)
 
         if "demo_url" in r.json() and not r.json()["demo_url"]:
@@ -141,8 +141,8 @@ def getnewgames():
             query.execute("SELECT match_id FROM match WHERE parsedcorrectly = true ORDER BY match_id DESC LIMIT 1")
             output = query.fetchone()
             mostrecentmatchid = output and output[0] or 138067450 or 138067446
-            print(output)
-            print(mostrecentmatchid,"mostrecent")
+            # print(output)
+            # print(mostrecentmatchid,"mostrecent")
     if len(unfinisheddownloads) < 10:
         print("doing new matches")
         r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":1000,"format":"json","order_direction":"asc","min_match_id":mostrecentmatchid,"max_unix_timestamp":int(time.time()-3600*5)})
@@ -167,7 +167,7 @@ def main():
     while True:
         thing = lexiesiplist.copy()
         # print(list(thing.values()))
-        with ThreadPoolExecutor(max_workers=(sum(list(map(lambda x:x["maxrequests"]*int(x["healthy"]),list(thing.values())))))) as executor:
+        with ThreadPoolExecutor(max_workers=(sum(list(map(lambda x:x["maxrequests"]*int(x["healthy"]),list(thing.values())))))-2) as executor:
             games = [
                 executor.submit(dothing, i)
                 for i in getnewgames()
