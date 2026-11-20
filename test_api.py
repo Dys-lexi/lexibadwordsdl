@@ -23,8 +23,11 @@ def checkifworking():
         except requests.RequestException:
             healthy = False
         with lock:
-            lexiesiplist[server] = {"healthy":healthy and healthy.ok,"maxrequests":(healthy or 0) and healthy.json().get("max_concurrent_requests",12)}
-        print(json.dumps(lexiesiplist,indent=4))
+            # if healthy:
+                # print({"healthy":healthy and healthy.ok,"maxrequests":(healthy or 0) and healthy.json().get("max_concurrent_requests",12)})
+                # print(healthy.json().get("max_concurrent_requests",12))
+            lexiesiplist[server] = {"healthy":healthy and healthy.ok,"maxrequests":(healthy or 0) and (healthy.ok or 0 ) and healthy.json().get("max_concurrent_requests",12)}
+    print(json.dumps(lexiesiplist,indent=4))
 
 
 def parse_on_backend(matchid, payload):
@@ -44,7 +47,11 @@ def parse_on_backend(matchid, payload):
             attempted.add(server)
             print("parsing match", matchid, "on", server, "active parses", active)
             response = requests.post(f"{server}/parse", json=payload, timeout=(5, None))
-            result = response.json()
+            # print(response.text)
+            try:
+                result = response.json()
+            except:
+                return (matchid,True)
             if response.status_code == 503 and result.get("error", {}).get("code") == "busy":
                 print("backend busy", server, "match", matchid)
                 continue
@@ -141,7 +148,8 @@ def main():
     threading.Thread(target=checkifworkingstometimes, daemon=True).start()
     while True:
         thing = lexiesiplist.copy()
-        with ThreadPoolExecutor(max_workers=12*len(sum(list(map(lambda x:thing["maxrequests"]*int(thing["healthy"]),list(thing.values())))))) as executor:
+        # print(list(thing.values()))
+        with ThreadPoolExecutor(max_workers=(sum(list(map(lambda x:x["maxrequests"]*int(x["healthy"]),list(thing.values())))))) as executor:
             games = [
                 executor.submit(dothing, i)
                 for i in getnewgames()
