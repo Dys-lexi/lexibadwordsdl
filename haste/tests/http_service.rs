@@ -78,6 +78,23 @@ async fn request(app: Router, payload: Value) -> (StatusCode, Value) {
     (status, serde_json::from_slice(&bytes).unwrap())
 }
 
+#[tokio::test]
+async fn health_reports_configured_concurrency_limit() {
+    let app = router(Config {
+        max_concurrent_requests: 7,
+        ..Config::default()
+    })
+    .unwrap();
+    let response = app
+        .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
+    let health: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(health["max_concurrent_requests"], 7);
+}
+
 fn varint(mut value: u32, output: &mut Vec<u8>) {
     while value >= 128 {
         output.push((value as u8 & 127) | 128);

@@ -190,9 +190,11 @@ pub fn router(config: Config) -> Result<Router, reqwest::Error> {
         .route("/parse", post(parse))
         .route(
             "/health",
-            get(|| async {
+            get(|State(state): State<AppState>| async move {
                 Json(json!({
-                    "status": "ok", "runners": [Runner::ChatMessages, Runner::DemoCheck]
+                    "status": "ok",
+                    "runners": [Runner::ChatMessages, Runner::DemoCheck],
+                    "max_concurrent_requests": state.config.max_concurrent_requests,
                 }))
             }),
         )

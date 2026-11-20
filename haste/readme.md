@@ -116,7 +116,8 @@ five minutes.
 Downloads, decompression, and parsing happen in memory. Compression is detected
 from the content, supporting bzip2, Zstandard (including Valve files named
 `.dem.bz2`), and raw Source 2 demos. No temporary demo files or subprocesses are
-used. `GET /health` reports service status and available runner names.
+used. `GET /health` reports service status, available runner names, and the
+configured `MAX_CONCURRENT_REQUESTS` as the integer field `max_concurrent_requests`.
 
 Chat fields preserve the existing extractor: `class` is the internal hero class,
 `souls` is net worth, team souls are the sum of player net worth, and `build` is

@@ -10,7 +10,7 @@ from initsql import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
 print("started")
 lock = threading.Lock()
-lexiesiplist = {"http://haste:80":False,"http://100.95.78.79:80":False,"https://deadlock.allusive.me:443":False}
+lexiesiplist = {"http://haste:80":{"healthy":False,"maxrequests":0},"http://100.95.78.79:80":{"healthy":False,"maxrequests":0},"https://deadlock.allusive.me:443":{"healthy":False,"maxrequests":0}}
 
 # Each entry represents an outstanding /parse request from this updater.
 running_tasks = {server: [] for server in lexiesiplist}
@@ -19,13 +19,12 @@ running_tasks = {server: [] for server in lexiesiplist}
 def checkifworking():
     for server in lexiesiplist:
         try:
-            healthy = requests.get(f"{server}/health", timeout=10).ok
+            healthy = requests.get(f"{server}/health", timeout=10)
         except requests.RequestException:
             healthy = False
         with lock:
-            lexiesiplist[server] = healthy
-            matches = running_tasks[server].copy()
-        print(server, "healthy", healthy, "active parses", len(matches), "matches", matches)
+            lexiesiplist[server] = {"healthy":healthy and healthy.ok,"maxrequests":(healthy or 0) and healthy.json().get("max_concurrent_requests",12)}
+        print(json.dumps(lexiesiplist,indent=4))
 
 
 def parse_on_backend(matchid, payload):
@@ -33,11 +32,11 @@ def parse_on_backend(matchid, payload):
     while True:
         with lock:
             candidates = [server for server, healthy in lexiesiplist.items()
-                          if healthy and server not in attempted]
+                          if healthy["healthy"] and server not in attempted]
             if not candidates:
                 break
             random.shuffle(candidates)  # Spread requests evenly when counts are tied.
-            server = min(candidates, key=lambda url: len(running_tasks[url]))
+            server = max(candidates, key=lambda url: lexiesiplist[url]["maxrequests"] - len(running_tasks[url]))
             running_tasks[server].append(matchid)
             active = len(running_tasks[server])
 
@@ -55,7 +54,7 @@ def parse_on_backend(matchid, payload):
             return (matchid, True)
         except requests.ConnectionError as error:
             with lock:
-                lexiesiplist[server] = False
+                lexiesiplist[server]["healthy"] = False
             print("backend unavailable", server, "match", matchid, error)
         finally:
             with lock:
@@ -141,7 +140,8 @@ def main():
     time.sleep(5)
     threading.Thread(target=checkifworkingstometimes, daemon=True).start()
     while True:
-        with ThreadPoolExecutor(max_workers=16) as executor:
+        thing = lexiesiplist.copy()
+        with ThreadPoolExecutor(max_workers=12*len(sum(list(map(lambda x:thing["maxrequests"]*int(thing["healthy"]),list(thing.values())))))) as executor:
             games = [
                 executor.submit(dothing, i)
                 for i in getnewgames()
