@@ -10,20 +10,60 @@ from initsql import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
 print("started")
 lock = threading.Lock()
-lexiesiplist = {"http://haste:80":False,"http://100.95.78.79:80":False}
+lexiesiplist = {"http://haste:80":False,"http://100.95.78.79:80":False,"https://deadlock.allusive.me:443":False}
+
+# Each entry represents an outstanding /parse request from this updater.
+running_tasks = {server: [] for server in lexiesiplist}
+
 
 def checkifworking():
-    global lexiesiplist
-    print("checking ips")
-    with lock:
-        duplicate = dict(lexiesiplist)
-    for thing in duplicate:
+    for server in lexiesiplist:
         try:
-            r = requests.get(f"{thing}/health",timeout=10)
+            healthy = requests.get(f"{server}/health", timeout=10).ok
+        except requests.RequestException:
+            healthy = False
+        with lock:
+            lexiesiplist[server] = healthy
+            matches = running_tasks[server].copy()
+        print(server, "healthy", healthy, "active parses", len(matches), "matches", matches)
+
+
+def parse_on_backend(matchid, payload):
+    attempted = set()
+    while True:
+        with lock:
+            candidates = [server for server, healthy in lexiesiplist.items()
+                          if healthy and server not in attempted]
+            if not candidates:
+                break
+            random.shuffle(candidates)  # Spread requests evenly when counts are tied.
+            server = min(candidates, key=lambda url: len(running_tasks[url]))
+            running_tasks[server].append(matchid)
+            active = len(running_tasks[server])
+
+        try:
+            attempted.add(server)
+            print("parsing match", matchid, "on", server, "active parses", active)
+            response = requests.post(f"{server}/parse", json=payload, timeout=(5, None))
+            result = response.json()
+            if response.status_code == 503 and result.get("error", {}).get("code") == "busy":
+                print("backend busy", server, "match", matchid)
+                continue
+            if "results" in result:
+                return result
+            print("parse failed", matchid, server, result)
+            return (matchid, True)
+        except requests.ConnectionError as error:
             with lock:
-                lexiesiplist[thing] = r.ok()
-        except:
-            lexiesiplist[thing] = False
+                lexiesiplist[server] = False
+            print("backend unavailable", server, "match", matchid, error)
+        finally:
+            with lock:
+                running_tasks[server].remove(matchid)
+
+    print("no available backend for match", matchid)
+    return (matchid, True)
+
 
 def dothing(matchid):
     try:
@@ -53,35 +93,13 @@ def dothing(matchid):
         url = r.json()["demo_url"]
         
         payload = {"url": url, "run": ["deadlock-chat-messages"]}
-        print("downloading / parsing demo")
-        try:
-            try:
-                print("doing dis")
-                request = requests.post(f"{random.choice(list(map(lambda x: x[0],filter(lambda x: x[1],lexiesiplist.items()))))}/parse", 
-                                json=payload,
-                                headers={"Content-Type": "application/json"})
-            except:
-                print("doing dat")
-                request = requests.post("http://haste:80/parse", 
-                                json=payload,
-                                headers={"Content-Type": "application/json"})
-        except:
-            traceback.print_exc()
-            return (matchid,True)
-        
-        print("Parsed demo",matchid,"in",f"{time.time()-now:.3f} seconds")
-        
-        # print(json.dumps(request.json(),indent=4))
-        # with open ("xyz.json","w") as f:
-        #     (json.dump(request.json(),f,indent=4))
-        x = request.json()
-        if "results" not in x:
-            print("failed3",x)
-            return (matchid,True)
+        result = parse_on_backend(matchid, payload)
+        if isinstance(result, dict):
+            print("Parsed demo", matchid, "in", f"{time.time()-now:.3f} seconds")
+        return result
     except Exception:
         traceback.print_exc()
-
-    return request.json()
+        return (matchid, True)
 
 
 def dothingparttwo(matchid):
@@ -120,9 +138,10 @@ def checkifworkingstometimes():
         checkifworking()
 def main():
     checkifworking()
+    time.sleep(5)
     threading.Thread(target=checkifworkingstometimes, daemon=True).start()
     while True:
-        with ThreadPoolExecutor(max_workers=12) as executor:
+        with ThreadPoolExecutor(max_workers=16) as executor:
             games = [
                 executor.submit(dothing, i)
                 for i in getnewgames()
@@ -202,4 +221,5 @@ def parsegame(game,i):
     
 
 
-main()
+if __name__ == "__main__":
+    main()
