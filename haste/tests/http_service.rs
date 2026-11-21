@@ -761,7 +761,31 @@ async fn stalled_sequential_replay_times_out_after_its_last_chunk() {
     replay_stream_case(true).await;
 }
 
-async fn ranged_replay_case(padding_commands: usize, bad_range: bool, limit: usize) {
+#[tokio::test]
+async fn concurrent_replays_share_the_download_rate_without_timing_out() {
+    let demo = chat_demo();
+    let size = demo.len();
+    let rate = (size as u64 * 4).div_ceil(3);
+    let upstream = serve_bytes(demo).await;
+    let app = router(Config {
+        max_download_bytes_per_second: rate,
+        max_concurrent_requests: 2,
+        download_read_timeout_seconds: 1,
+        ..config()
+    })
+    .unwrap();
+    let payload = json!({"url": upstream.url, "run": ["deadlock-chat-messages"]});
+    let started = tokio::time::Instant::now();
+    let (first, second) =
+        tokio::join!(request(app.clone(), payload.clone()), request(app, payload));
+
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+    let expected = Duration::from_secs_f64(2.0 * size as f64 / rate as f64);
+    assert!(started.elapsed() + Duration::from_millis(10) >= expected);
+}
+
+async fn ranged_replay_case(padding_commands: usize, bad_range: bool, limit: usize, rate: u64) {
     let demo = chat_demo();
     let mut large_demo = demo[..16].to_vec();
     // Leave the chat packets at the end so parsing checks the final range.
@@ -826,9 +850,11 @@ async fn ranged_replay_case(padding_commands: usize, bad_range: bool, limit: usi
         }),
     ))
     .await;
+    let started = tokio::time::Instant::now();
     let (status, body) = request(
         router(Config {
             max_download_bytes: limit,
+            max_download_bytes_per_second: rate,
             download_read_timeout_seconds: 3,
             ..config()
         })
@@ -846,6 +872,10 @@ async fn ranged_replay_case(padding_commands: usize, bad_range: bool, limit: usi
         return;
     }
     assert_eq!(status, StatusCode::OK, "{body}");
+    if rate > 0 {
+        let expected = Duration::from_secs_f64(total as f64 / rate as f64);
+        assert!(started.elapsed() + Duration::from_millis(10) >= expected);
+    }
     assert_eq!(
         body["results"]["deadlock-chat-messages"]["chat"][1]["text"],
         "last message"
@@ -876,20 +906,25 @@ async fn ranged_replay_case(padding_commands: usize, bad_range: bool, limit: usi
 
 #[tokio::test]
 async fn large_replay_uses_eight_ranges_and_reassembles_the_demo() {
-    ranged_replay_case(9, false, usize::MAX).await;
+    ranged_replay_case(9, false, usize::MAX, 0).await;
+}
+
+#[tokio::test]
+async fn range_workers_share_the_download_rate() {
+    ranged_replay_case(9, false, usize::MAX, 25_000_000).await;
 }
 
 #[tokio::test]
 async fn mismatched_content_range_falls_back_to_one_full_transfer() {
-    ranged_replay_case(9, true, usize::MAX).await;
+    ranged_replay_case(9, true, usize::MAX, 0).await;
 }
 
 #[tokio::test]
 async fn small_replay_with_range_support_uses_a_single_full_transfer() {
-    ranged_replay_case(0, false, usize::MAX).await;
+    ranged_replay_case(0, false, usize::MAX, 0).await;
 }
 
 #[tokio::test]
 async fn oversized_replay_is_rejected_before_opening_range_workers() {
-    ranged_replay_case(9, false, 8 * 1024 * 1024).await;
+    ranged_replay_case(9, false, 8 * 1024 * 1024, 0).await;
 }

@@ -3,12 +3,62 @@ use axum::http::{StatusCode, header};
 use futures_util::{StreamExt as _, stream::FuturesUnordered};
 use reqwest::{Client, Response, Url};
 use serde_json::{Value, json};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::time::{Instant, sleep_until, timeout};
 
 const RANGE_WORKERS: usize = 8;
 const MIN_PARALLEL_BYTES: usize = 8 * 1024 * 1024;
 static NEXT_DOWNLOAD_ID: AtomicU64 = AtomicU64::new(1);
+
+pub(super) struct ReplayClient {
+    http: Client,
+    read_timeout: Duration,
+    bytes_per_second: u64,
+    next_read: Mutex<Instant>,
+}
+
+impl ReplayClient {
+    pub(super) fn new(http: Client, config: &Config) -> Self {
+        Self {
+            http,
+            read_timeout: Duration::from_secs(config.download_read_timeout_seconds),
+            bytes_per_second: config.max_download_bytes_per_second,
+            next_read: Mutex::new(Instant::now()),
+        }
+    }
+
+    async fn read<T>(&self, read: impl Future<Output = reqwest::Result<T>>) -> Result<T, ApiError> {
+        timeout(self.read_timeout, read)
+            .await
+            .map_err(|_| {
+                ApiError::new(
+                    StatusCode::GATEWAY_TIMEOUT,
+                    "download_failed",
+                    "timed out waiting for replay data",
+                )
+            })?
+            .map_err(ApiError::upstream)
+    }
+
+    async fn pace(&self, bytes: usize) {
+        if self.bytes_per_second == 0 {
+            return;
+        }
+        let duration = Duration::from_secs_f64(bytes as f64 / self.bytes_per_second as f64);
+        let deadline = {
+            let mut next_read = self.next_read.lock().unwrap();
+            // Keep a few milliseconds of credit to absorb timer rounding across small chunks.
+            let earliest = Instant::now() - Duration::from_millis(5);
+            *next_read = (*next_read).max(earliest) + duration;
+            *next_read
+        };
+        if deadline > Instant::now() {
+            sleep_until(deadline).await;
+        }
+    }
+}
 
 pub(super) struct DownloadLog {
     id: String,
@@ -100,7 +150,7 @@ fn validator(response: &Response) -> Option<Validator> {
 }
 
 pub(super) async fn download(
-    client: &Client,
+    client: &ReplayClient,
     url: Url,
     config: &Config,
     active_requests: usize,
@@ -135,20 +185,24 @@ pub(super) async fn download(
 }
 
 async fn transfer(
-    client: &Client,
+    client: &ReplayClient,
     url: Url,
     limit: usize,
     log: &mut DownloadLog,
 ) -> Result<Vec<u8>, ApiError> {
     match client
-        .get(url.clone())
-        .header(header::RANGE, "bytes=0-0")
-        .send()
+        .read(
+            client
+                .http
+                .get(url.clone())
+                .header(header::RANGE, "bytes=0-0")
+                .send(),
+        )
         .await
     {
         // An upstream that ignores the probe has already sent the full response.
         Ok(response) if response.status() == StatusCode::OK => {
-            return read_sequential(response, limit, log).await;
+            return read_sequential(client, response, limit, log).await;
         }
         Ok(response) if response.status() == StatusCode::PARTIAL_CONTENT => {
             let range = content_range(&response);
@@ -182,15 +236,15 @@ async fn transfer(
         ),
         Err(error) => log.event(
             "download_fallback",
-            json!({"stage": "probe", "reason": error.without_url().to_string()}),
+            json!({"stage": "probe", "reason": error.message}),
         ),
     }
-    let response = client.get(url).send().await.map_err(ApiError::upstream)?;
-    read_sequential(response, limit, log).await
+    let response = client.read(client.http.get(url).send()).await?;
+    read_sequential(client, response, limit, log).await
 }
 
 async fn read_ranged(
-    client: &Client,
+    client: &ReplayClient,
     url: &Url,
     size: usize,
     validator: Option<&Validator>,
@@ -205,12 +259,13 @@ async fn read_ranged(
             let start = index * chunk_size;
             let end = start + dest.len() - 1;
             let mut request = client
+                .http
                 .get(url.clone())
                 .header(header::RANGE, format!("bytes={start}-{end}"));
             if let Some((_, value)) = validator {
                 request = request.header(header::IF_RANGE, value.clone());
             }
-            let mut response = request.send().await.map_err(ApiError::upstream)?;
+            let mut response = client.read(request.send()).await?;
             if response.status() != StatusCode::PARTIAL_CONTENT
                 || content_range(&response) != Some((start, end, size))
             {
@@ -225,12 +280,13 @@ async fn read_ranged(
                 return Err(failed("replay changed during ranged download"));
             }
             let mut filled = 0;
-            while let Some(chunk) = response.chunk().await.map_err(ApiError::upstream)? {
+            while let Some(chunk) = client.read(response.chunk()).await? {
                 log.received_bytes
                     .fetch_add(chunk.len() as u64, Ordering::Relaxed);
                 if chunk.len() > dest.len() - filled {
                     return Err(failed("replay body exceeds its declared range"));
                 }
+                client.pace(chunk.len()).await;
                 dest[filled..filled + chunk.len()].copy_from_slice(&chunk);
                 filled += chunk.len();
             }
@@ -248,6 +304,7 @@ async fn read_ranged(
 }
 
 async fn read_sequential(
+    client: &ReplayClient,
     mut response: Response,
     limit: usize,
     log: &mut DownloadLog,
@@ -268,12 +325,13 @@ async fn read_sequential(
     }
     log.event("download_sequential_started", json!({}));
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(ApiError::upstream)? {
+    while let Some(chunk) = client.read(response.chunk()).await? {
         log.received_bytes
             .fetch_add(chunk.len() as u64, Ordering::Relaxed);
         if chunk.len() > limit - bytes.len() {
             return Err(too_large());
         }
+        client.pace(chunk.len()).await;
         bytes.extend_from_slice(&chunk);
     }
     if size.is_some_and(|len| len != bytes.len()) {

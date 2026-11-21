@@ -140,6 +140,7 @@ Configuration (environment variables):
 | --- | --- | --- |
 | `BIND_ADDR` | `0.0.0.0:80` | Service listener address |
 | `MAX_DOWNLOAD_BYTES` | `536870912` | Maximum downloaded size (512 MiB) |
+| `MAX_DOWNLOAD_SPEED` | `0` | Combined replay download rate in Mbps (`0` is unlimited) |
 | `MAX_DEMO_BYTES` | `2147483648` | Maximum decompressed size (2 GiB) |
 | `MAX_CONCURRENT_REQUESTS` | `1` | Downloads/parses allowed at once |
 | `DOWNLOAD_READ_TIMEOUT_SECONDS` | `30` | Time allowed for replay response headers or between body reads |

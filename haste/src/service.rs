@@ -21,6 +21,7 @@ mod download;
 #[derive(Clone, Debug)]
 pub struct Config {
     pub max_download_bytes: usize,
+    pub max_download_bytes_per_second: u64,
     pub max_demo_bytes: usize,
     pub max_concurrent_requests: usize,
     pub download_read_timeout_seconds: u64,
@@ -32,6 +33,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             max_download_bytes: 512 * 1024 * 1024,
+            max_download_bytes_per_second: 0,
             max_demo_bytes: 2 * 1024 * 1024 * 1024,
             max_concurrent_requests: 1,
             download_read_timeout_seconds: 30,
@@ -54,8 +56,19 @@ impl Config {
             }
         }
         let defaults = Self::default();
+        let max_download_bytes_per_second = match std::env::var("MAX_DOWNLOAD_SPEED") {
+            Ok(value) if !value.is_empty() => value
+                .parse::<f64>()
+                .ok()
+                .filter(|speed| speed.is_finite() && *speed >= 0.0)
+                .map(|speed| (speed * 125_000.0).ceil() as u64)
+                .ok_or_else(|| io::Error::other("MAX_DOWNLOAD_SPEED must be nonnegative Mbps"))?,
+            Ok(_) | Err(std::env::VarError::NotPresent) => defaults.max_download_bytes_per_second,
+            Err(error) => return Err(io::Error::other(error)),
+        };
         Ok(Self {
             max_download_bytes: positive("MAX_DOWNLOAD_BYTES", defaults.max_download_bytes)?,
+            max_download_bytes_per_second,
             max_demo_bytes: positive("MAX_DEMO_BYTES", defaults.max_demo_bytes)?,
             max_concurrent_requests: positive(
                 "MAX_CONCURRENT_REQUESTS",
@@ -78,7 +91,7 @@ impl Config {
 
 #[derive(Clone)]
 struct AppState {
-    client: Client,
+    replay_client: Arc<download::ReplayClient>,
     config: Arc<Config>,
     slots: Arc<Semaphore>,
 }
@@ -156,7 +169,6 @@ pub fn router(config: Config) -> Result<Router, reqwest::Error> {
     let client = Client::builder()
         .user_agent("haste-demo-service/0.1")
         .connect_timeout(Duration::from_secs(5))
-        .read_timeout(Duration::from_secs(config.download_read_timeout_seconds))
         .retry(reqwest::retry::never())
         .default_headers(
             [(
@@ -181,7 +193,7 @@ pub fn router(config: Config) -> Result<Router, reqwest::Error> {
         }))
         .build()?;
     let state = AppState {
-        client,
+        replay_client: Arc::new(download::ReplayClient::new(client, &config)),
         slots: Arc::new(Semaphore::new(config.max_concurrent_requests)),
         config: Arc::new(config),
     };
@@ -262,7 +274,7 @@ async fn parse(
         )
     })?;
     let (compressed, download_log) = download::download(
-        &state.client,
+        &state.replay_client,
         url,
         &state.config,
         state.config.max_concurrent_requests - state.slots.available_permits(),
