@@ -7,10 +7,13 @@ import random
 import functools
 from psycopg2.extras import Json
 from initsql import *
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed,wait, FIRST_COMPLETED
 print("started")
 lock = threading.Lock()
-lexiesiplist = {"http://haste:80":{"healthy":False,"maxrequests":0},"http://100.95.78.79:80":{"healthy":False,"maxrequests":0},"https://deadlock.allusive.me:443":{"healthy":False,"maxrequests":0}}
+lexiesiplist = {"http://haste:80":{"healthy":False,"maxrequests":0},
+            "http://100.95.78.79:80":{"healthy":False,"maxrequests":0},
+            "https://deadlock.allusive.me:443":{"healthy":False,"maxrequests":0},
+            "http://100.109.189.63:80":{"healthy":False,"maxrequests":0}}
 
 # Each entry represents an outstanding /parse request from this updater.
 running_tasks = {server: [] for server in lexiesiplist}
@@ -51,7 +54,7 @@ def parse_on_backend(matchid, payload,server):
     try:
         #     attempted.add(server)
     # print("parsing match", matchid, "on", server)
-        print("asking haste for",matchid)
+        # print("asking haste for",matchid)
         response = requests.post(f"{server}/parse", json=payload, timeout=(5, None))
         # print(response.text)
         try:
@@ -60,8 +63,8 @@ def parse_on_backend(matchid, payload,server):
             return (matchid,True)
         if response.status_code == 503 and result.get("error", {}).get("code") == "busy":
             print("backend busy", server, "match", matchid)
-            with lock:
-                lexiesiplist[server]["healthy"] = False
+            # with lock:
+            #     lexiesiplist[server]["healthy"] = False
             return (matchid,True)
         if "results" in result:
             # try: 
@@ -94,10 +97,10 @@ def dothing(matchid,server):
             print(r.text)
             print("salt failed for",matchid)
             return (matchid, True)
-        print("got salt",matchid)
+        # print("got salt",matchid)
 
         if "demo_url" in r.json() and not r.json()["demo_url"]:
-            print("failed here2",r.text)
+            # print("failed here2",r.text)
             with querywrapper() as query:
                 query.execute("INSERT INTO match (match_id,parsedcorrectly) VALUES (%s,%s) ON CONFLICT (match_id) DO UPDATE SET parsedcorrectly = %s",(matchid,True,True))
                 query.commit()
@@ -129,28 +132,28 @@ def dothingparttwo(matchid):
 
 
 def getnewgames():
-
-    with querywrapper() as query:
-        query.execute("SELECT match_id FROM match WHERE parsedcorrectly = false ORDER BY match_id LIMIT 1000")
-        unfinisheddownloads = query.fetchall()
-        if len(unfinisheddownloads) < 10:
-            query.execute("SELECT match_id FROM match WHERE parsedcorrectly = true ORDER BY match_id DESC LIMIT 1")
-            output = query.fetchone()
-            mostrecentmatchid = output and output[0] or 138067450 or 138067446
-            # print(output)
-            # print(mostrecentmatchid,"mostrecent")
-    if len(unfinisheddownloads) < 10:
-        print("doing new matches")
-        r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":1000,"format":"json","order_direction":"asc","min_match_id":mostrecentmatchid,"max_unix_timestamp":int(time.time()-3600*5)})
-    else:
-        print("redoing broken matches")
-        r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":1000,"format":"json","order_direction":"asc","match_ids":",".join(list(map(lambda x: str(x[0]),unfinisheddownloads)))})
-    print("pulled matches")
-    if "application/json" not in r.headers.get("Content-Type", ""):
-        print(r.text)
-        print("failed to parse match metadata")
-        time.sleep(60)
-    yield from list(map(lambda x: x["match_id"],r.json()))
+    while True:
+        with querywrapper() as query:
+            query.execute("SELECT match_id FROM match WHERE parsedcorrectly = false ORDER BY match_id LIMIT 1000")
+            unfinisheddownloads = query.fetchall()
+            if len(unfinisheddownloads) < 500:
+                query.execute("SELECT match_id FROM match WHERE parsedcorrectly = true ORDER BY match_id DESC LIMIT 1")
+                output = query.fetchone()
+                mostrecentmatchid = output and output[0] or 138067450 or 138067446
+                # print(output)
+                # print(mostrecentmatchid,"mostrecent")
+        if len(unfinisheddownloads) < 500:
+            print("doing new matches")
+            r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":1000,"format":"json","order_direction":"asc","min_match_id":mostrecentmatchid,"max_unix_timestamp":int(time.time()-3600*5)})
+        else:
+            print("redoing broken matches")
+            r = requests.get( 'https://api.deadlock-api.com/v1/matches/metadata',params={"include_info":"true","limit":1000,"format":"json","order_direction":"asc","match_ids":",".join(list(map(lambda x: str(x[0]),unfinisheddownloads)))})
+        print("pulled matches")
+        if "application/json" not in r.headers.get("Content-Type", ""):
+            print(r.text)
+            print("failed to parse match metadata")
+            time.sleep(60)
+        yield from list(map(lambda x: x["match_id"],r.json()))
 
 def checkifworkingstometimes():
     while True:
@@ -183,7 +186,8 @@ def chooseandwaitforaserver(matchid):
             if slots > 0:
                 running_tasks[server].append(matchid)
                 print(f"doing {matchid} on {server} ({lexiesiplist[server]["maxrequests"] - len(running_tasks[server])} slots left)")
-        time.sleep(0.5)
+                break
+        time.sleep(10)
     output = (matchid,True)
     try:
         output = dothing(matchid,server)
@@ -196,7 +200,7 @@ def chooseandwaitforaserver(matchid):
 def parseplayers():
     while True:
         with querywrapper() as query:
-            query.execute("SELECT account_id FROM players WHERE last_updated IS NULL or last_updated < %s ORDER BY last_updated LIMIT 1000",(int(time.time())-86400*30,))
+            query.execute("SELECT account_id FROM players WHERE last_updated IS NULL or last_updated < %s ORDER BY last_updated LIMIT 1000",(int(time.time())-86400*60,))
             output = query.fetchall()
         if not output: 
             time.sleep(3600)
@@ -208,39 +212,56 @@ def parseplayers():
             time.sleep(120)
             continue
         if not response.ok:
-            print("request broke",response.text)
+            print("steam request broke",response.text)
             time.sleep(3600)
+            continue
         try:
+            now = time.time()
             print("doing",len(response.json()),"steamids")
             for person in response.json():
                 # print(person)
                 with querywrapper() as query:
                     query.execute("UPDATE players SET personaname = %s, profileurl = %s, avatar = %s, last_updated = %s WHERE account_id = %s",(person["personaname"],person["profileurl"],person["avatar"].rsplit("/",1)[1].split(".")[0],int(time.time()),person["account_id"]) )
                     query.commit()
-            print("did steamids")
+            print("did steamids in",f"{time.time()-now:.3f}")
         except:
+            print(response.text)
             traceback.print_exc()
-        time.sleep(120)
+        time.sleep(30)
 
 def main():
     checkifworking(firstime=True)
     time.sleep(5)
     threading.Thread(target=parseplayers,daemon=True).start()
     threading.Thread(target=checkifworkingstometimes, daemon=True).start()
-    while True:
-        thing = lexiesiplist.copy()
-        # print(list(thing.values()))
-        with ThreadPoolExecutor(max_workers=(sum(list(map(lambda x:x["maxrequests"]*int(x["healthy"]),list(thing.values())))))) as executor:
-            games = [
-                executor.submit(chooseandwaitforaserver, i)
-                for i in getnewgames()
-            ]
-
-            for i, game in enumerate(as_completed(games)):
+    # while True:
+    #     thing = lexiesiplist.copy()
+    #     # print(list(thing.values()))
+    with ThreadPoolExecutor(max_workers=100) as executor:
+        games = getnewgames()
+        pending = set()
+        while True:
+            with lock:
+                thing = lexiesiplist.copy()
+            while len(pending) < sum(list(map(lambda x:x["maxrequests"]*int(x["healthy"]),list(thing.values())))):
+                pending.add(executor.submit(chooseandwaitforaserver, next(games)))
+            finished,pending = wait(pending,return_when=FIRST_COMPLETED)
+            for game in finished:
                 try:
-                    parsegame(game.result(),i)
+                    parsegame(game.result())
                 except Exception:
-                    traceback.print_exc()            
+                    traceback.print_exc()      
+        # with ThreadPoolExecutor(max_workers=(sum(list(map(lambda x:x["maxrequests"]*int(x["healthy"]),list(thing.values())))))) as executor:
+        #     games = [
+        #         executor.submit(chooseandwaitforaserver, i)
+        #         for i in getnewgames()
+        #     ]
+
+        #     for i, game in enumerate(as_completed(games)):
+        #         try:
+        #             parsegame(game.result(),i)
+        #         except Exception:
+        #             traceback.print_exc()            
                 
         print("sleep time!")
         time.sleep(5)
@@ -253,7 +274,7 @@ def main():
 # with ThreadPoolExecutor(max_workers=5) as executor:
 #     executor.map(my_function, range(100))
 
-def parsegame(game,i):
+def parsegame(game,i=0):
     # print(type(game))
     if type(game) == tuple:
         print("could not parse",game)
@@ -263,7 +284,7 @@ def parsegame(game,i):
                 query.commit()
         return
     game = game["results"]["deadlock-chat-messages"]
-    print("saving game",game["match"]["match_id"])
+    # print("saving game",game["match"]["match_id"])
     with querywrapper() as query:
         query.execute("SELECT table_name,column_name FROM information_schema.columns")
         rows = functools.reduce(lambda a,b: {**a,b[0]:[*a.get(b[0],[]),b[1]]}, query.fetchall(),{})
