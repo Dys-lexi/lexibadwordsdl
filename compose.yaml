@@ -8,6 +8,7 @@ services:
     environment:
       BIND_ADDR: "0.0.0.0:80"
       MAX_DOWNLOAD_BYTES: "${MAX_DOWNLOAD_BYTES:-536870912}"
+      MAX_DOWNLOAD_SPEED:  "${MAX_DOWNLOAD_SPEED:-0}"
       MAX_DEMO_BYTES: "${MAX_DEMO_BYTES:-2147483648}"
       MAX_CONCURRENT_REQUESTS: "${MAX_CONCURRENT_REQUESTS:-1}"
       DOWNLOAD_READ_TIMEOUT_SECONDS: "${DOWNLOAD_READ_TIMEOUT_SECONDS:-30}"
@@ -20,6 +21,8 @@ services:
     #   - ./haste/:/app/haste:ro
     cap_drop:
       - ALL
+    cap_add:
+      - NET_ADMIN
     security_opt:
       - no-new-privileges:true
     sysctls:

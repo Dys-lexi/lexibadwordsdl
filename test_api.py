@@ -17,6 +17,7 @@ running_tasks = {server: [] for server in lexiesiplist}
 
 
 def checkifworking(firstime = False):
+    print("checking backends")
     for server in lexiesiplist:
         try:
             healthy = requests.get(f"{server}/health", timeout=5)
@@ -28,7 +29,7 @@ def checkifworking(firstime = False):
                 # print({"healthy":healthy and healthy.ok,"maxrequests":(healthy or 0) and healthy.json().get("max_concurrent_requests",12)})
                 # print(healthy.json().get("max_concurrent_requests",12))
             
-            lexiesiplist[server] = {"healthy":healthy and healthy.ok,"maxrequests":(healthy or 0) and (healthy.ok or 0 ) and healthy.json().get("max_concurrent_requests",12)}
+            lexiesiplist[server] = {"healthy":(healthy or False) and healthy.ok,"maxrequests":(healthy or 0) and (healthy.ok or 0 ) and healthy.json().get("max_concurrent_requests",12)}
     if firstime:
         print(json.dumps(lexiesiplist,indent=4))
 
@@ -63,6 +64,11 @@ def parse_on_backend(matchid, payload,server):
                 lexiesiplist[server]["healthy"] = False
             return (matchid,True)
         if "results" in result:
+            # try: 
+            #     response = requests.get("https://api.deadlock-api.com/v1/players/steam",params={"account_ids":",".join(list(map(lambda x: x["account_id"],result["results"]["deadlock-chat-messages"]["match"]["players"])))})
+                
+            # except requests.ConnectionError as error:
+            #     pass
             return result
         print("parse failed", matchid, server, result)
         return (matchid, True)
@@ -77,20 +83,12 @@ def parse_on_backend(matchid, payload,server):
 
 def dothing(matchid,server):
     try:
-        print("doing",matchid)
+        # print("doing",matchid)
         now = time.time()
-        with querywrapper() as query:
-            query.execute("SELECT parsedcorrectly FROM match WHERE match_id = %s LIMIT 1",(matchid,))
-            output = query.fetchone()
-            if not output or not output[0]:
-                query.execute("DELETE FROM match WHERE match_id = %s",(matchid,))
-                query.execute("INSERT INTO match (match_id,parsedcorrectly) VALUES (%s,%s)",(matchid,False))
-                query.commit()
-        if output and output[0]: 
-            print("failed here - already questioned")
-            return (matchid,False)
+
         r = requests.get(f"https://api.deadlock-api.com/v1/matches/{matchid}/salts",params={"disable_steam":"true"})
         if r.status_code == 429 or r.status_code == 500:
+            print("429 or 500 status code for",matchid)
             return (matchid,True)
         if "application/json" not in r.headers.get("Content-Type", ""):
             print(r.text)
@@ -105,6 +103,7 @@ def dothing(matchid,server):
                 query.commit()
             return (matchid,False)
         elif "demo_url" not in r.json():
+            print("bad json for",matchid)
             return (matchid,True)
 
         url = r.json()["demo_url"]
@@ -159,13 +158,32 @@ def checkifworkingstometimes():
         checkifworking()
 
 def chooseandwaitforaserver(matchid):
+    with querywrapper() as query:
+        query.execute("SELECT parsedcorrectly FROM match WHERE match_id = %s LIMIT 1",(matchid,))
+        output = query.fetchone()
+        if not output or not output[0]:
+            query.execute("DELETE FROM match WHERE match_id = %s",(matchid,))
+            query.execute("INSERT INTO match (match_id,parsedcorrectly) VALUES (%s,%s)",(matchid,False))
+            query.commit()
+    if output and output[0]: 
+        print("failed here - already questioned")
+        return (matchid,False)
     with lock:
         server = max(lexiesiplist,key = lambda x: lexiesiplist[x]["maxrequests"]*int(lexiesiplist[x]["healthy"]) - len(running_tasks[x]))
-        while lexiesiplist[server]["maxrequests"] - len(running_tasks[server]) <= 0:
+        slots = lexiesiplist[server]["maxrequests"] - len(running_tasks[server])
+        if slots > 0:
+            running_tasks[server].append(matchid)
+            print(f"doing {matchid} on {server} ({lexiesiplist[server]["maxrequests"] - len(running_tasks[server])} slots left)")
+
+    while slots <= 0:
+        with lock:
             server = max(lexiesiplist,key = lambda x: lexiesiplist[x]["maxrequests"]*int(lexiesiplist[x]["healthy"]) - len(running_tasks[x]))
             print("waiting on slot avaialble :(",lexiesiplist[server]["maxrequests"] - len(running_tasks[server]))
-        running_tasks[server].append(matchid)
-        print(f"doing {matchid} on {server} ({lexiesiplist[server]["maxrequests"] - len(running_tasks[server])} slots left)")
+            slots = lexiesiplist[server]["maxrequests"] - len(running_tasks[server])
+            if slots > 0:
+                running_tasks[server].append(matchid)
+                print(f"doing {matchid} on {server} ({lexiesiplist[server]["maxrequests"] - len(running_tasks[server])} slots left)")
+        time.sleep(0.5)
     output = (matchid,True)
     try:
         output = dothing(matchid,server)
@@ -175,9 +193,39 @@ def chooseandwaitforaserver(matchid):
         running_tasks[server].remove(matchid)
     return output
 
+def parseplayers():
+    while True:
+        with querywrapper() as query:
+            query.execute("SELECT account_id FROM players WHERE last_updated IS NULL or last_updated < %s ORDER BY last_updated LIMIT 1000",(int(time.time())-86400*30,))
+            output = query.fetchall()
+        if not output: 
+            time.sleep(3600)
+            continue
+        try:
+            print("requesting steamids")
+            response = requests.get("https://api.deadlock-api.com/v1/players/steam",params={"account_ids":",".join(list(map(lambda x: str(x[0]),output)))})
+        except requests.ConnectionError as error:
+            time.sleep(120)
+            continue
+        if not response.ok:
+            print("request broke",response.text)
+            time.sleep(3600)
+        try:
+            print("doing",len(response.json()),"steamids")
+            for person in response.json():
+                # print(person)
+                with querywrapper() as query:
+                    query.execute("UPDATE players SET personaname = %s, profileurl = %s, avatar = %s, last_updated = %s WHERE account_id = %s",(person["personaname"],person["profileurl"],person["avatar"].rsplit("/",1)[1].split(".")[0],int(time.time()),person["account_id"]) )
+                    query.commit()
+            print("did steamids")
+        except:
+            traceback.print_exc()
+        time.sleep(120)
+
 def main():
     checkifworking(firstime=True)
     time.sleep(5)
+    threading.Thread(target=parseplayers,daemon=True).start()
     threading.Thread(target=checkifworkingstometimes, daemon=True).start()
     while True:
         thing = lexiesiplist.copy()

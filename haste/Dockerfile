@@ -15,7 +15,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/target/release/haste-server /usr/local/bin/haste-server
-USER 10001:10001
+# USER 10001:10001
 ENV BIND_ADDR=0.0.0.0:80
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
