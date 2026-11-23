@@ -33,7 +33,8 @@ The response is pretty printed JSON:
     "deadlock-chat-messages": {
       "match": {},
       "chat": [],
-      "events": []
+      "events": [],
+      "items": []
     }
   }
 }
@@ -82,6 +83,16 @@ Final totals come from `PostMatchDetails`, including for players who disconnecte
 before the last chat. Missing totals remain null, and draws/errors have no winner.
 Unknown mode IDs are preserved with null names. Match details are returned even
 when there are no chat messages. Existing fields inside each chat message remain.
+
+The `items` array contains one row per shop notification in demo order, including
+repeat purchases, sales, and refunds. Each row has the player's `account_id`, the
+replay `tick` of the shop notification,
+the same `game_time` in seconds used by chat, the numeric `item` ID, and
+`bought` (true for a purchase, false for a sale). `imbuedability` is an array
+of numeric ability IDs in replay order, or `[]` when no target is available. `kills`,
+`deaths`, `assists`, and `souls` (net worth) come from the player's controller
+at the transaction tick. Missing values are null. All item data comes from
+the demo stream, including in demos without final match details.
 
 The sibling `events` array contains only `player_death` and `objective_death`
 events, in replay order. Each event includes `tick`, `game_time`, and `assists`.

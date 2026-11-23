@@ -241,7 +241,8 @@ async fn final_match_scoreboard_is_returned_with_chat() {
     })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let result = &body["results"]["deadlock-chat-messages"];
-    assert_eq!(result.as_object().unwrap().len(), 3);
+    assert_eq!(result.as_object().unwrap().len(), 4);
+    assert_eq!(result["items"], json!([]));
     assert_eq!(result["events"], json!([]));
     assert_eq!(result["chat"].as_array().unwrap().len(), 2);
     let info = &result["match"];

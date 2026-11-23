@@ -1,3 +1,5 @@
+mod items;
+
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek};
 use std::sync::Arc;
@@ -12,7 +14,8 @@ use crate::fxhash;
 use crate::parser::{Context, Parser, Visitor};
 use crate::valveprotos::common::{CDemoClassInfo, CDemoFileHeader, CMsgPlayerInfo, EDemoCommands};
 use crate::valveprotos::deadlock::{
-    CCitadelUserMsgChatMsg, CCitadelUserMsgPostMatchDetails, CitadelUserMessageIds,
+    CCitadelUserMessageItemPurchaseNotification, CCitadelUserMsgChatMsg,
+    CCitadelUserMsgPostMatchDetails, CitadelUserMessageIds,
 };
 use base64::Engine as _;
 use prost::Message as _;
@@ -46,6 +49,19 @@ pub(super) fn account_id(steam_id: u64) -> Option<u32> {
     } else {
         u32::try_from(steam_id).ok()
     }
+}
+
+fn user_info(ctx: &Context, slot: i32) -> Option<CMsgPlayerInfo> {
+    let table = ctx.string_tables()?.find_table("userinfo")?;
+    let bytes = table.get_item(&slot)?.get_user_data()?;
+    CMsgPlayerInfo::decode(bytes).ok()
+}
+
+fn info_account_id(info: &CMsgPlayerInfo) -> Option<u32> {
+    info.steamid
+        .or(info.xuid)
+        .and_then(account_id)
+        .filter(|id| *id != 0)
 }
 
 pub(super) fn game_time(ctx: &Context) -> Option<f64> {
@@ -117,6 +133,7 @@ fn hero_snapshot(ctx: &Context, tick: i32, samples: &HeroSnapshots) -> Option<He
 #[derive(Default)]
 struct ChatVisitor {
     messages: Vec<Value>,
+    items: items::Transactions,
     player_names: BTreeMap<u32, String>,
     events: Vec<Value>,
     entity_names: BTreeMap<u64, String>,
@@ -156,16 +173,8 @@ impl ChatVisitor {
 
     fn record(&mut self, ctx: &Context, chat: CCitadelUserMsgChatMsg) {
         let slot = chat.player_slot;
-        let user_info = slot.and_then(|slot| {
-            let table = ctx.string_tables()?.find_table("userinfo")?;
-            let bytes = table.get_item(&slot)?.get_user_data()?;
-            CMsgPlayerInfo::decode(bytes).ok()
-        });
-        let user_account_id = user_info
-            .as_ref()
-            .and_then(|info| info.steamid.or(info.xuid))
-            .and_then(account_id)
-            .filter(|id| *id != 0);
+        let user_info = slot.and_then(|slot| user_info(ctx, slot));
+        let user_account_id = user_info.as_ref().and_then(info_account_id);
 
         let entities = ctx.entities();
         let controller = entities.and_then(|entities| {
@@ -259,10 +268,11 @@ impl Visitor for ChatVisitor {
 
     fn on_entity(
         &mut self,
-        _ctx: &Context,
-        _delta_header: DeltaHeader,
+        ctx: &Context,
+        delta_header: DeltaHeader,
         entity: &Entity,
     ) -> Result<(), Self::Error> {
+        self.items.observe(ctx, delta_header, entity);
         if entity.serializer_name_heq(CONTROLLER)
             && let Some(id) = entity
                 .get_value::<u64>(&PLAYER_STEAM_ID)
@@ -299,6 +309,9 @@ impl Visitor for ChatVisitor {
     ) -> Result<(), Self::Error> {
         // on_tick_end runs after the first command of a tick, which can omit
         // subsequent entity updates. Sample the completed previous tick here.
+        if self.last_tick != Some(header.tick) {
+            self.items.finish_tick(ctx);
+        }
         if let Some(tick) = self.last_tick
             && tick != header.tick
             && let Some(snapshot) = hero_snapshot(ctx, tick, &self.heroes)
@@ -348,6 +361,10 @@ impl Visitor for ChatVisitor {
                 ctx,
                 CCitadelUserMsgChatMsg::decode(data).map_err(io::Error::other)?,
             );
+        } else if packet_type == CitadelUserMessageIds::KEUserMsgItemPurchaseNotification as u32 {
+            let notification = CCitadelUserMessageItemPurchaseNotification::decode(data)
+                .map_err(io::Error::other)?;
+            self.items.record(ctx, notification);
         } else if packet_type == CitadelUserMessageIds::KEUserMsgPostMatchDetails as u32 {
             let details =
                 CCitadelUserMsgPostMatchDetails::decode(data).map_err(io::Error::other)?;
@@ -362,7 +379,7 @@ impl Visitor for ChatVisitor {
     }
 }
 
-/// Extract match details and a JSON chat array from an uncompressed demo reader.
+/// Extract match details, chat, death events, and shop transactions from a demo.
 pub fn run<R: Read + Seek>(
     reader: R,
     match_start_unix: Option<f64>,
@@ -387,6 +404,8 @@ pub fn run<R: Read + Seek>(
     if let Some(snapshot) = hero_snapshot(parser.context(), parser.context().tick(), &heroes) {
         heroes.observe(snapshot);
     }
+    let mut items = std::mem::take(&mut parser.visitor_mut().items);
+    items.finish_tick(parser.context());
     let mut visitor = parser.into_visitor();
     // PostMatchDetails arrives after the chats, so fill earlier messages too.
     let unix = visitor.match_start_unix.or_else(|| {
@@ -423,5 +442,6 @@ pub fn run<R: Read + Seek>(
         "match": summary,
         "chat": std::mem::take(&mut visitor.messages),
         "events": std::mem::take(&mut visitor.events),
+        "items": items.rows,
     }))
 }

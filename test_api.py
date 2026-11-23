@@ -14,6 +14,8 @@ lexiesiplist = {"http://haste:80":{"healthy":False,"maxrequests":0},
             "http://portablefakeserver:80":{"healthy":False,"maxrequests":0},
             "http://fish.tail99fc5d.ts.net:7543":{"healthy":False,"maxrequests":0},
             "http://dublex-1:80":{"healthy":False,"maxrequests":0},
+            "http://mecomputer.tailb9d154.ts.net:80":{"healthy":False,"maxrequests":0},
+            "http://craptop-server.tailcb145b.ts.net:6969":{"healthy":False,"maxrequests":0},
             "http://diesel-power.tail1dda98.ts.net:7543":{"healthy":False,"maxrequests":0}}
 
 # Each entry represents an outstanding /parse request from this updater.
@@ -21,7 +23,7 @@ running_tasks = {server: [] for server in lexiesiplist}
 
 
 def checkifworking(firstime = False):
-    print("checking backends")
+    # print("checking backends")
     for server in lexiesiplist:
         try:
             healthy = requests.get(f"{server}/health", timeout=5)
@@ -36,6 +38,8 @@ def checkifworking(firstime = False):
             lexiesiplist[server] = {"healthy":(healthy or False) and healthy.ok,"maxrequests":(healthy or 0) and (healthy.ok or 0 ) and healthy.json().get("max_concurrent_requests",12)}
     if firstime:
         print(json.dumps(lexiesiplist,indent=4))
+    else:
+        print("backend status"," ".join(list(map(lambda x: f"{x[0].split("://",1)[1]+":":_>10} {x[1]["healthy"]}",lexiesiplist.items()))))
 
 
 def parse_on_backend(matchid, payload,server):
@@ -56,7 +60,7 @@ def parse_on_backend(matchid, payload,server):
         #     attempted.add(server)
     # print("parsing match", matchid, "on", server)
         # print("asking haste for",matchid)
-        response = requests.post(f"{server}/parse", json=payload, timeout=(5, None))
+        response = requests.post(f"{server}/parse", json=payload, timeout=(600))
         # print(response.text)
         try:
             result = response.json()
@@ -64,8 +68,8 @@ def parse_on_backend(matchid, payload,server):
             return (matchid,True)
         if response.status_code == 503 and result.get("error", {}).get("code") == "busy":
             print("backend busy", server, "match", matchid)
-            # with lock:
-            #     lexiesiplist[server]["healthy"] = False
+            with lock:
+                lexiesiplist[server]["healthy"] = False
             return (matchid,True)
         if "results" in result:
             # try: 
@@ -91,7 +95,7 @@ def dothing(matchid,server):
         now = time.time()
 
         r = requests.get(f"https://api.deadlock-api.com/v1/matches/{matchid}/salts",params={"disable_steam":"true"})
-        if r.status_code == 429 or r.status_code == 500:
+        if r.status_code == 429 or r.status_code == 500 or r.status_code == 404 or not r.ok:
             print("429 or 500 status code for",matchid)
             return (matchid,True)
         if "application/json" not in r.headers.get("Content-Type", ""):
@@ -120,6 +124,11 @@ def dothing(matchid,server):
             with querywrapper() as query:
                 query.execute("INSERT INTO match (match_id,parsedcorrectly,unix) VALUES (%s,%s,%s) ON CONFLICT (match_id) DO UPDATE SET parsedcorrectly = %s",(matchid,True,int(time.time()),True))
                 query.commit()
+        print("server:",server)
+        # if server == "http://localhost:80":
+        #     print("HEREEE")
+        #     with open ("xyz.json","w") as f:
+        #         json.dump(result,f,indent=4)
         return result
     except Exception:
         traceback.print_exc()
@@ -321,13 +330,17 @@ def parsegame(game,i=0):
         output = query.fetchone()
         if not output or output[0] != len(game["chat"]):
             for chat_number, data in enumerate(game["chat"]):
-                data = {**game["match"],**data,"chat_number":chat_number}
+                data = {**game["match"],**data,"chat_number":chat_number,"imbuedability":Json(data["imbuedability"])}
                 # print(data)
                 # print(rows[table])
                 # print(list(filter(lambda x: x in rows[table],data)))
                 # print(f"INSERT INTO {table} ({",".join(list(filter(lambda x: x in rows[table],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows[table],data))))})")
                 # print(list(map(lambda x: x[1],filter(lambda x: x[0] in rows[table],data.items()))))
                 query.execute(f"INSERT INTO {"chat"} ({",".join(list(filter(lambda x: x in rows["chat"],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows["chat"],data))))})",list(map(lambda x: x[1],filter(lambda x: x[0] in rows["chat"],data.items()))))
+        if not output or output[0] != len(game["items"]):
+            for item_number, data in enumerate(game["items"]):
+                data = {**game["match"],**data,"item_number":item_number}
+                query.execute(f"INSERT INTO {"items"} ({",".join(list(filter(lambda x: x in rows["items"],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows["items"],data))))})",list(map(lambda x: x[1],filter(lambda x: x[0] in rows["items"],data.items()))))
         query.execute("SELECT COUNT(*) FROM events WHERE match_id = %s",(game["match"]["match_id"],))
         output = query.fetchone()
         if not output or output[0] != len(game["events"]):

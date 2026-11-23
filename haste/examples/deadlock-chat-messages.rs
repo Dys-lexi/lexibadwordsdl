@@ -1,4 +1,4 @@
-//! Print pretty JSON match details, chat messages, and death events from an uncompressed demo.
+//! Print pretty JSON match details, chat messages, death events, and shop transactions from an uncompressed demo.
 //! cargo run --release --example deadlock-chat-messages -- <demo.dem> [match-start-unix]
 use std::fs::File;
 use std::io::{self, BufReader, Write};

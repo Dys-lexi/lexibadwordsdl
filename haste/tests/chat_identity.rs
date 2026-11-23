@@ -5,7 +5,9 @@ use haste::valveprotos::common::{
     c_demo_class_info::ClassT,
     c_demo_string_tables::{ItemsT, TableT},
 };
-use haste::valveprotos::deadlock::CCitadelUserMsgChatMsg;
+use haste::valveprotos::deadlock::{
+    CCitadelUserMessageItemPurchaseNotification, CCitadelUserMsgChatMsg, CitadelUserMessageIds,
+};
 use prost::Message;
 use serde_json::{Value, json};
 
@@ -81,7 +83,7 @@ fn packet(demo: &mut Vec<u8>, kind: u64, message: impl Message) {
 // Controller lobby slots deliberately disagree with userinfo/chat slots.
 // Sender 111 uses chat slot 0 and lobby slot 5; sender 222 uses chat slot 5
 // and lobby slot 1. Slot-based matching either loses or misattributes stats.
-fn parse_chat(identities: &[CMsgPlayerInfo], chat_slots: &[i32]) -> Value {
+fn player_demo(identities: &[CMsgPlayerInfo], chat_slots: &[i32]) -> Vec<u8> {
     let mut demo = b"PBDEMS2\0".to_vec();
     demo.extend([0; 8]);
     for name in ["userinfo", "instancebaseline"] {
@@ -225,6 +227,11 @@ fn parse_chat(identities: &[CMsgPlayerInfo], chat_slots: &[i32]) -> Value {
             },
         );
     }
+    demo
+}
+
+fn parse_chat(identities: &[CMsgPlayerInfo], chat_slots: &[i32]) -> Value {
+    let mut demo = player_demo(identities, chat_slots);
     demo.extend([0, 42, 0]);
     haste::runners::chat_messages::run(std::io::Cursor::new(demo), None).unwrap()
 }
@@ -281,4 +288,42 @@ fn chat_can_resolve_userinfo_xuid() {
     );
     assert_eq!(result["chat"][0]["account_id"], 111);
     assert_eq!(result["chat"][0]["kills"], 8);
+}
+
+#[test]
+fn each_shop_notification_gets_a_row_with_the_players_current_stats() {
+    let identities = [CMsgPlayerInfo {
+        steamid: Some(STEAM_BASE + 111),
+        ..Default::default()
+    }];
+    let mut demo = player_demo(&identities, &[]);
+    for (slot, sell) in [(0, None), (0, Some(true)), (0, Some(false)), (-1, None)] {
+        packet(
+            &mut demo,
+            CitadelUserMessageIds::KEUserMsgItemPurchaseNotification as u64,
+            CCitadelUserMessageItemPurchaseNotification {
+                userid: Some(slot),
+                ability_id: Some(4000000000),
+                sell,
+                quickbuy: None,
+            },
+        );
+    }
+    demo.extend([0, 42, 0]);
+    let result = haste::runners::chat_messages::run(std::io::Cursor::new(demo), None).unwrap();
+    let items = result["items"].as_array().unwrap();
+    assert_eq!(items.len(), 4);
+    for (row, bought) in items.iter().zip([true, false, true]) {
+        assert_eq!(
+            *row,
+            json!({
+                "account_id": 111, "tick": 42, "game_time": null, "imbuedability": [], "item": 4000000000u32,
+                "kills": 8, "deaths": 9, "assists": 22, "souls": 62663, "bought": bought
+            })
+        );
+    }
+    assert_eq!(items[3]["item"], 4000000000u32);
+    assert!(items[3]["account_id"].is_null());
+    assert!(items[3]["souls"].is_null());
+    assert_eq!(parse_chat(&identities, &[])["items"], json!([]));
 }

@@ -250,6 +250,23 @@ def init():
     PRIMARY KEY(match_id, chat_number)
     )""")
 
+    c.execute("""CREATE TABLE IF NOT EXISTS items (
+    game_time INTEGER,
+    imbuedability BIGINT[],
+    account_id INTEGER,
+    kills INTEGER,
+    deaths INTEGER,
+    assists INTEGER,
+    souls INTEGER,
+    tick INTEGER,
+    match_id INTEGER,
+    item_number INTEGER,
+    item BIGINT,
+    bought BOOLEAN,
+    PRIMARY KEY(match_id, item_number)
+    )""")
+
+
     c.execute("""CREATE TABLE IF NOT EXISTS players (
     match_ids INTEGER[],
     account_id INTEGER,
@@ -259,6 +276,8 @@ def init():
     personaname TEXT,
     PRIMARY KEY (account_id)
     )""")
+    c.execute("ALTER TABLE chat ADD COLUMN IF NOT EXISTS tick INTEGER")
+    c.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS tick INTEGER")
 
 
 
