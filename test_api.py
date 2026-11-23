@@ -10,13 +10,16 @@ from initsql import *
 from concurrent.futures import ThreadPoolExecutor, as_completed,wait, FIRST_COMPLETED
 print("started")
 lock = threading.Lock()
-lexiesiplist = {"http://haste:80":{"healthy":False,"maxrequests":0},
+lexiesiplist = {
+            "http://haste:80":{"healthy":False,"maxrequests":0},
             "http://portablefakeserver:80":{"healthy":False,"maxrequests":0},
             "http://fish.tail99fc5d.ts.net:7543":{"healthy":False,"maxrequests":0},
             "http://dublex-1:80":{"healthy":False,"maxrequests":0},
+            "http://lentilserver-1:80":{"healthy":False,"maxrequests":0},
             "http://mecomputer.tailb9d154.ts.net:80":{"healthy":False,"maxrequests":0},
             "http://craptop-server.tailcb145b.ts.net:6969":{"healthy":False,"maxrequests":0},
-            "http://diesel-power.tail1dda98.ts.net:7543":{"healthy":False,"maxrequests":0}}
+            "http://diesel-power.tail1dda98.ts.net:7543":{"healthy":False,"maxrequests":0}
+            }
 
 # Each entry represents an outstanding /parse request from this updater.
 running_tasks = {server: [] for server in lexiesiplist}
@@ -364,7 +367,7 @@ def parsegame(game,i=0):
             # print((*list(map(lambda x: x[1],filter(lambda x: x[0] in rows["players"],{**data,"match_ids":[game["match"]["match_id"]]}.items()))),*list(map(lambda x: x[1],filter(lambda x: x[0] in rows["players"],{**data,"match_ids":[game["match"]["match_id"]]}.items())))))
             query.execute(f"INSERT INTO {"players"} ({",".join(list(filter(lambda x: x in rows["players"],{**data,"match_ids":[game["match"]["match_id"]]})))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows["players"],{**data,"match_ids":[game["match"]["match_id"]]}))))}) ON CONFLICT (account_id) DO UPDATE SET {",".join(list(map(lambda x: f"{x} = %s",list(filter(lambda x: x in rows["players"],data)))))}, match_ids = players.match_ids || %s",(*list(map(lambda x: x[1],filter(lambda x: x[0] in rows["players"],{**data,"match_ids":[game["match"]["match_id"]]}.items()))),*list(map(lambda x: x[1],filter(lambda x: x[0] in rows["players"],{**data,"match_ids":[game["match"]["match_id"]]}.items())))))
         query.commit()
-    print("saved game",game["match"]["match_id"])
+    print("saved game",game["match"]["match_id"],(int(time.time()-game["match"]["unix"])//3600),"h", int(((time.time()-game["match"]["unix"]) % 3600) // 60),"m", int((time.time()-game["match"]["unix"]) % 60),"s behind")
         
         
 
