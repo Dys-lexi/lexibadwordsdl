@@ -442,6 +442,6 @@ pub fn run<R: Read + Seek>(
         "match": summary,
         "chat": std::mem::take(&mut visitor.messages),
         "events": std::mem::take(&mut visitor.events),
-        "items": items.rows,
+        "items": items.rows(&info),
     }))
 }

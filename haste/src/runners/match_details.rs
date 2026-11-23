@@ -39,6 +39,8 @@ pub(super) struct Player {
     pub account_id: Option<u32>,
     #[prost(uint32, optional, tag = "2")]
     pub player_slot: Option<u32>,
+    #[prost(message, repeated, tag = "4")]
+    pub items: Vec<crate::valveprotos::deadlock::c_msg_match_meta_data_contents::Items>,
     #[prost(int32, optional, tag = "6")]
     pub team: Option<i32>,
     #[prost(uint32, optional, tag = "8")]

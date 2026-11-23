@@ -91,8 +91,10 @@ the same `game_time` in seconds used by chat, the numeric `item` ID, and
 `bought` (true for a purchase, false for a sale). `imbuedability` is an array
 of numeric ability IDs in replay order, or `[]` when no target is available. `kills`,
 `deaths`, `assists`, and `souls` (net worth) come from the player's controller
-at the transaction tick. Missing values are null. All item data comes from
-the demo stream, including in demos without final match details.
+at the transaction tick. If the live notification and item entity leave the player
+unknown, Haste checks the demo's embedded post-match item history for a unique
+purchase or sale of that item at that time. The stats still come from the
+transaction tick. Unresolved identities and unavailable stats are null.
 
 The sibling `events` array contains only `player_death` and `objective_death`
 events, in replay order. Each event includes `tick`, `game_time`, and `assists`.

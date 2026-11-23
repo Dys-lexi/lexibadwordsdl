@@ -330,16 +330,18 @@ def parsegame(game,i=0):
         output = query.fetchone()
         if not output or output[0] != len(game["chat"]):
             for chat_number, data in enumerate(game["chat"]):
-                data = {**game["match"],**data,"chat_number":chat_number,"imbuedability":Json(data["imbuedability"])}
+                data = {**game["match"],**data,"chat_number":chat_number}
                 # print(data)
                 # print(rows[table])
                 # print(list(filter(lambda x: x in rows[table],data)))
                 # print(f"INSERT INTO {table} ({",".join(list(filter(lambda x: x in rows[table],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows[table],data))))})")
                 # print(list(map(lambda x: x[1],filter(lambda x: x[0] in rows[table],data.items()))))
                 query.execute(f"INSERT INTO {"chat"} ({",".join(list(filter(lambda x: x in rows["chat"],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows["chat"],data))))})",list(map(lambda x: x[1],filter(lambda x: x[0] in rows["chat"],data.items()))))
-        if not output or output[0] != len(game["items"]):
+        query.execute("SELECT COUNT(*) FROM items WHERE match_id = %s",(game["match"]["match_id"],))
+        output = query.fetchone()
+        if not output or output[0] != len(game.get("items",[])):
             for item_number, data in enumerate(game["items"]):
-                data = {**game["match"],**data,"item_number":item_number}
+                data = {**game["match"],**data,"item_number":item_number}#,"imbuedability":Json(data["imbuedability"])}
                 query.execute(f"INSERT INTO {"items"} ({",".join(list(filter(lambda x: x in rows["items"],data)))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows["items"],data))))})",list(map(lambda x: x[1],filter(lambda x: x[0] in rows["items"],data.items()))))
         query.execute("SELECT COUNT(*) FROM events WHERE match_id = %s",(game["match"]["match_id"],))
         output = query.fetchone()

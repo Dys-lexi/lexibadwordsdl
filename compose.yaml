@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "${PORT:-80}:80"
+    pull_policy: always
     environment:
       BIND_ADDR: "0.0.0.0:80"
       MAX_DOWNLOAD_BYTES: "${MAX_DOWNLOAD_BYTES:-536870912}"
