@@ -280,11 +280,21 @@ def init():
     )""")
     c.execute("ALTER TABLE chat ADD COLUMN IF NOT EXISTS tick INTEGER")
     c.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS tick INTEGER")
-
-
-
-
-    # c.execute( # barely used, as overshadowed by currentname
+    # print("making indexes")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_events_killer_account_id ON events (killer_account_id)")
+    # print("1")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_events_victim_account_id ON events (victim_account_id)")
+    # print("1.5")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_account_id ON chat (account_id)")
+    # print("2")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_events_match_id ON events (match_id)")
+    # print("3")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_match_id ON chat (match_id)")
+    # print("4")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_items_match_id ON items (match_id)")
+    # print("5")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_items_account_id ON items (account_id)")
+    # print("6")# c.execute( # barely used, as overshadowed by currentname
     #     """CREATE TABLE IF NOT EXISTS vanityurls (
     #         vanity TEXT PRIMARY KEY,
 

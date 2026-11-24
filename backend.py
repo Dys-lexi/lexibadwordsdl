@@ -37,7 +37,7 @@ def searchforplayer(name,limit=10,offset=0,strict=False):
         with querywrapper() as query:
             query.execute("SELECT account_id,personaname,avatar,match_ids FROM players WHERE profileurl LIKE %s",(f"https://steamcommunity.com/id/{name.rsplit("id/",1)[1].replace("/","")}/",))
             output = query.fetchone()
-            print("here1",output)
+            # print("here1",output)
     elif accountid or strict:
         with querywrapper() as query:
             query.execute("SELECT account_id,personaname,avatar,match_ids FROM players WHERE account_id = %s",(accountid,))
@@ -59,6 +59,19 @@ def searchforplayer(name,limit=10,offset=0,strict=False):
 # print(searchforplayer("[U:1:1028429733]"))
 # print(json.dumps(searchforplayer("soft cl"),indent=4))
 
+def getchatmessages(account_id):
+    with querywrapper() as query:
+        query.execute("SELECT table_name,column_name FROM information_schema.columns")
+        rows = functools.reduce(lambda a,b: {**a,b[0]:[*a.get(b[0],[]),b[1]]}, query.fetchall(),{})
+        query.execute(f"SELECT {",".join(rows["chat"])} FROM chat WHERE account_id = %s",(account_id,))
+        return list(map(lambda x: dict(zip(rows["chat"],x)), query.fetchall()))
+
+def getevents(account_id):
+    with querywrapper() as query:
+        query.execute("SELECT table_name,column_name FROM information_schema.columns")
+        rows = functools.reduce(lambda a,b: {**a,b[0]:[*a.get(b[0],[]),b[1]]}, query.fetchall(),{})
+        query.execute(f"SELECT {",".join(rows["events"])} FROM events WHERE killer_account_id = %s OR victim_account_id = %s",(account_id,account_id))
+        return list(map(lambda x: dict(zip(rows["events"],x)), query.fetchall()))
 
 app = Flask(__name__)
 
@@ -66,11 +79,19 @@ app = Flask(__name__)
 def search():
     return searchforplayer(request.args.get("name") or request.get_json()["name"])
 
+@app.route("/messages",methods=["POST","GET"])
+def messages():
+    return getchatmessages(request.args.get("account_id") or request.get_json()["account_id"])
+
+@app.route("/events",methods=["POST","GET"])
+def events():
+    return getevents(request.args.get("account_id") or request.get_json()["account_id"])
+
 @app.route("/playerdetails",methods=["POST","GET"])
 def details():
     account_id = request.args.get("account_id") or request.get_json()["account_id"]
     def yeilder():
-        yield json.dumps(player := searchforplayer(account_id,strict=True))
+        yield json.dumps(player := searchforplayer(account_id,strict=True)) + "\n"
         if not player[0]:
             return 
         yield json.dumps(getchatmessages(account_id))
