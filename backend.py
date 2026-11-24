@@ -35,12 +35,12 @@ def searchforplayer(name,limit=10,offset=0,strict=False):
     # print(toaccountid(name))
     if not (accountid := toaccountid(name)) and len(name.rsplit("id/")) == 2 and not strict:
         with querywrapper() as query:
-            query.execute("SELECT account_id,personaname,avatar,match_ids FROM players WHERE profileurl LIKE %s",(f"https://steamcommunity.com/id/{name.rsplit("id/",1)[1].replace("/","")}/",))
+            query.execute("SELECT account_id,personaname,avatar,match_ids,profileurl FROM players WHERE profileurl LIKE %s",(f"https://steamcommunity.com/id/{name.rsplit("id/",1)[1].replace("/","")}/",))
             output = query.fetchone()
             # print("here1",output)
     elif accountid or strict:
         with querywrapper() as query:
-            query.execute("SELECT account_id,personaname,avatar,match_ids FROM players WHERE account_id = %s",(accountid,))
+            query.execute("SELECT account_id,personaname,avatar,match_ids,profileurl FROM players WHERE account_id = %s",(accountid,))
             output = query.fetchone()   
             # print("HERE")
             if not output:
@@ -52,25 +52,35 @@ def searchforplayer(name,limit=10,offset=0,strict=False):
 
         with querywrapper() as query:
             # print("here")
-            query.execute("SELECT account_id,personaname,avatar,match_ids FROM players WHERE personaname ILIKE %s ORDER BY personaname ILIKE %s DESC,cardinality(match_ids) DESC ,LENGTH(personaname) LIMIT %s OFFSET %s",(f"%{(name).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%",f"{(name).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}",limit,offset))
+            query.execute("SELECT account_id,personaname,avatar,match_ids,profileurl FROM players WHERE personaname ILIKE %s ORDER BY personaname ILIKE %s DESC,cardinality(match_ids) DESC ,LENGTH(personaname) LIMIT %s OFFSET %s",(f"%{(name).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%",f"{(name).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}",limit,offset))
             output = query.fetchall()
-    return list(map(lambda x: {"account_id":x[0],"personaname":x[1],"avatar":x[2],"match_ids":x[3]},output))
+    return list(map(lambda x: {"account_id":x[0],"personaname":x[1],"avatar":x[2],"match_ids":x[3],"profileurl":x[4]},output))
 
 # print(searchforplayer("[U:1:1028429733]"))
 # print(json.dumps(searchforplayer("soft cl"),indent=4))
+@cached(cache=TTLCache(maxsize=1024, ttl=900))
+def getmatches(account_id):
+    with querywrapper() as query:
+        query.execute("SELECT match_ids FROM players WHERE account_id = %s",(account_id,))
+        output = query.fetchone()
+    matches = {}
+    for matchid in output[0]:
+        matches[matchid] = gething("match",matchid,"match_id")
+    return matches
 
-def getchatmessages(account_id):
+@cached(cache=TTLCache(maxsize=1024, ttl=900))
+def gething(table, account_id,column = "account_id"):
     with querywrapper() as query:
         query.execute("SELECT table_name,column_name FROM information_schema.columns")
         rows = functools.reduce(lambda a,b: {**a,b[0]:[*a.get(b[0],[]),b[1]]}, query.fetchall(),{})
-        query.execute(f"SELECT {",".join(rows["chat"])} FROM chat WHERE account_id = %s",(account_id,))
-        return list(map(lambda x: dict(zip(rows["chat"],x)), query.fetchall()))
-
-def getevents(account_id):
+        query.execute(f"SELECT {",".join(rows[table])} FROM {table} WHERE {column} = %s",(account_id,))
+        return list(map(lambda x: dict(zip(rows[table],x)), query.fetchall()))
+@cached(cache=TTLCache(maxsize=1024, ttl=900))
+def getevents(account_id,match_id=False):
     with querywrapper() as query:
         query.execute("SELECT table_name,column_name FROM information_schema.columns")
         rows = functools.reduce(lambda a,b: {**a,b[0]:[*a.get(b[0],[]),b[1]]}, query.fetchall(),{})
-        query.execute(f"SELECT {",".join(rows["events"])} FROM events WHERE killer_account_id = %s OR victim_account_id = %s",(account_id,account_id))
+        query.execute(f"SELECT {",".join(rows["events"])} FROM events WHERE ({match_id and "match_id" or "killer_account_id"} = %s OR {match_id and "match_id" or "victim_account_id"} = %s)",(account_id,account_id))
         return list(map(lambda x: dict(zip(rows["events"],x)), query.fetchall()))
 
 app = Flask(__name__)
@@ -81,7 +91,15 @@ def search():
 
 @app.route("/messages",methods=["POST","GET"])
 def messages():
-    return getchatmessages(request.args.get("account_id") or request.get_json()["account_id"])
+    return gething("chat",request.args.get("account_id") or request.get_json()["account_id"])
+
+@app.route("/matches",methods=["POST","GET"])
+def matches():
+    return getmatches(request.args.get("account_id") or request.get_json()["account_id"])
+
+@app.route("/items",methods=["POST","GET"])
+def items():
+    return gething("items",request.args.get("account_id") or request.get_json()["account_id"])
 
 @app.route("/events",methods=["POST","GET"])
 def events():
@@ -94,7 +112,7 @@ def details():
         yield json.dumps(player := searchforplayer(account_id,strict=True)) + "\n"
         if not player[0]:
             return 
-        yield json.dumps(getchatmessages(account_id))
+        yield json.dumps(gething("chat",account_id))
     return Response(yeilder(), mimetype="application/x-ndjson")
 
 # @app.route("/detailedinfo")
