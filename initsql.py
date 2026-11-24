@@ -70,9 +70,11 @@ def print(*message, end="\033[0m\n",function = None,line=None):
         )
     else:
         realprint(
-            f"[38;2;215;22;105m{(('[' + function[:9].ljust(9) + ']') if currentfuncline != lastfuncline else '⯈'.ljust(11))}[38;2;126;89;140m{('[' + line.ljust(3) + ']')}[38;2;27;64;152m[{datetime.now().strftime('%H:%M:%S %d/%m')}][38;5;{linecolours[line]}m {(message)}",
+            f"[38;2;126;89;140m{('[' + line.ljust(3) + ']')}[38;2;27;64;152m[{datetime.now().strftime('%H:%M:%S %d/%m')}][38;5;{linecolours[line]}m {(message)}",
             end=end,
         )
+                    # f"[38;2;215;22;105m{(('[' + function[:9].ljust(9) + ']') if currentfuncline != lastfuncline else '⯈'.ljust(11))}[38;2;126;89;140m{('[' + line.ljust(3) + ']')}[38;2;27;64;152m[{datetime.now().strftime('%H:%M:%S %d/%m')}][38;5;{linecolours[line]}m {(message)}",
+
     lastfuncline = currentfuncline
 
 

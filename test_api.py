@@ -127,7 +127,7 @@ def dothing(matchid,server):
             with querywrapper() as query:
                 query.execute("INSERT INTO match (match_id,parsedcorrectly,unix) VALUES (%s,%s,%s) ON CONFLICT (match_id) DO UPDATE SET parsedcorrectly = %s",(matchid,True,int(time.time()),True))
                 query.commit()
-        print("server:",server)
+        # print("server:",server)
         # if server == "http://localhost:80":
         #     print("HEREEE")
         #     with open ("xyz.json","w") as f:
