@@ -36,6 +36,11 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}                                                                                                                                                                           
           password: ${{ secrets.DOCKERHUB_TOKEN }}                                                                                                                                                                        
                                                                                                                                                                                                                           
+      - name: Set up QEMU for ARM64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Set up Docker Buildx                                                                                                                                                                                        
         uses: docker/setup-buildx-action@v3                                                                                                                                                                               
                                                                                                                                                                                                                           
@@ -44,5 +49,6 @@ jobs:
         with:                                                                                                                                                                                                             
           context: ./haste                                                                                                                                                                                                   
           file: ./haste/Dockerfile                                                                                                                                                                                              
+          platforms: linux/amd64,linux/arm64
           push: true                                                                                                                                                                                                      
           tags: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKERHUB_PROJECT_NAME }}:latest-${{env.BRANCH_NAME}} 
