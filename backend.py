@@ -98,7 +98,7 @@ def accountidormatchid(request):
     if not id:
         id = request.args.get("match_id") or request.method == "POST" and request.get_json().get("match_id")
         column = "match_id"
-    return id, column
+    return int(id), column
 
 @app.route("/search",methods=["POST","GET"])
 def search():
@@ -138,13 +138,13 @@ def events():
 @app.route("/playerdetails",methods=["POST","GET"])
 def details():
     account_id = request.args.get("account_id") or request.get_json()["account_id"]
-    def yeilder():
-        yield json.dumps(player := searchforplayer(account_id,strict=True)) + "\n"
-        if not player[0]:
-            return 
-        yield json.dumps(gething("chat",account_id))
-    return Response(yeilder(), mimetype="application/x-ndjson")
-
+    # def yeilder():
+    #     yield json.dumps(player := searchforplayer(account_id,strict=True)) + "\n"
+    #     if not player[0]:
+    #         return 
+    #     yield json.dumps(gething("chat",account_id))
+    # return Response(yeilder(), mimetype="application/x-ndjson")
+    return searchforplayer(account_id,strict=True)
 @app.route("/lucky")
 def lucky():
     return "1028429733"

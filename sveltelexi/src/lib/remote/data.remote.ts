@@ -267,14 +267,15 @@ export const getlucky = query(async () => {
 
 export const search = query(	v.object({
 		name: v.string(),
-		querycount: v.number()
+		querycount: v.number(),
+		strict: v.boolean()
 	}), async (name) => {
 	// console.log("meow")
 	let status = 500;
 	let people = {} as Array<Playerdeadlock> 
 	let querycount = 0
 	try {
-		const response = await fetch(`${API_URL}/search`, {
+		const response = await fetch(`${API_URL}/${name.strict && "playerdetails" || "search"}`, {
 			method: 'POST',body: JSON.stringify(name),
 				headers: { 'Content-Type': 'application/json' }
 		});
@@ -292,4 +293,34 @@ export const search = query(	v.object({
 	}
 	// console.log("here")
 	return {people,querycount};
+});
+
+
+
+export const pullinfo = query(	v.object({
+		queryparam: v.number(),
+		querycolumn: v.string(),
+		querytable: v.string()
+	}), async (data) => {
+	// console.log("meow")
+	let status = 500;
+	let output = {}
+	try {
+		const response = await fetch(`${API_URL}/${data.querytable}`, {
+			method: 'POST',body: JSON.stringify({[data.querycolumn]:data.queryparam}),
+				headers: { 'Content-Type': 'application/json' }
+		});
+
+		status = response.status;
+		if (response.ok) {
+			let stuff =  await response.json()
+			output = stuff
+		} else {
+			error(500);
+		}
+	} catch {
+		error(500, { message: status.toString() });
+	}
+	// console.log("here")
+	return output;
 });

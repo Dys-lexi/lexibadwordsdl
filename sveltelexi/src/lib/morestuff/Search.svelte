@@ -79,7 +79,7 @@ import type {
   }
 async function searchforthing(name: string){
   querycount+=1
-  let stuff = await search({name,querycount})
+  let stuff = await search({name,querycount,strict:false})
   if (stuff.querycount >= querycount) {
     matches = stuff.people
   }
