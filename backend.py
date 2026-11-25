@@ -59,10 +59,14 @@ def searchforplayer(name,limit=10,offset=0,strict=False):
 # print(searchforplayer("[U:1:1028429733]"))
 # print(json.dumps(searchforplayer("soft cl"),indent=4))
 @cached(cache=TTLCache(maxsize=1024, ttl=900))
-def getmatches(account_id):
-    with querywrapper() as query:
-        query.execute("SELECT match_ids FROM players WHERE account_id = %s",(account_id,))
-        output = query.fetchone()
+def getmatches(account_id,column="account_id"):
+    assert column in ["account_id","match_id"]
+    if column == "account_id":
+        with querywrapper() as query:
+            query.execute(f"SELECT match_ids FROM players WHERE {column} = %s",(account_id,))
+            output = query.fetchone()
+    else:
+        output = [[account_id]]
     matches = {}
     for matchid in output[0]:
         matches[matchid] = gething("match",matchid,"match_id")
@@ -70,40 +74,61 @@ def getmatches(account_id):
 
 @cached(cache=TTLCache(maxsize=1024, ttl=900))
 def gething(table, account_id,column = "account_id"):
+    assert column in ["account_id","match_id"]
     with querywrapper() as query:
         query.execute("SELECT table_name,column_name FROM information_schema.columns")
         rows = functools.reduce(lambda a,b: {**a,b[0]:[*a.get(b[0],[]),b[1]]}, query.fetchall(),{})
         query.execute(f"SELECT {",".join(rows[table])} FROM {table} WHERE {column} = %s",(account_id,))
-        return list(map(lambda x: dict(zip(rows[table],x)), query.fetchall()))
+        return functools.reduce(lambda a,b: {**a,b[rows[table].index("match_id")]:[*a.get(b[rows[table].index("match_id")],[]),dict(zip(rows[table],b,strict=True))]} , query.fetchall(),{})
 @cached(cache=TTLCache(maxsize=1024, ttl=900))
 def getevents(account_id,match_id=False):
     with querywrapper() as query:
         query.execute("SELECT table_name,column_name FROM information_schema.columns")
         rows = functools.reduce(lambda a,b: {**a,b[0]:[*a.get(b[0],[]),b[1]]}, query.fetchall(),{})
         query.execute(f"SELECT {",".join(rows["events"])} FROM events WHERE ({match_id and "match_id" or "killer_account_id"} = %s OR {match_id and "match_id" or "victim_account_id"} = %s)",(account_id,account_id))
-        return list(map(lambda x: dict(zip(rows["events"],x)), query.fetchall()))
+        return functools.reduce(lambda a,b: {**a,b[rows["events"].index("match_id")]:[*a.get(b[rows["events"].index("match_id")],[]),dict(zip(rows["events"],b,strict=True))]} , query.fetchall(),{})
 
 app = Flask(__name__)
+
+def accountidormatchid(request):
+    id = request.args.get("account_id") or  request.method == "POST" and request.get_json().get("account_id")
+    column = "account_id"
+    if not id:
+        id = request.args.get("match_id") or request.method == "POST" and request.get_json().get("match_id")
+        column = "match_id"
+    return id, column
 
 @app.route("/search",methods=["POST","GET"])
 def search():
     return searchforplayer(request.args.get("name") or request.get_json()["name"])
 
-@app.route("/messages",methods=["POST","GET"])
+@app.route("/chat",methods=["POST","GET"])
 def messages():
-    return gething("chat",request.args.get("account_id") or request.get_json()["account_id"])
+    id, column = accountidormatchid(request)
+    if not id:
+        return {}, 404
+    return gething("chat",id,column)
 
-@app.route("/matches",methods=["POST","GET"])
+@app.route("/match",methods=["POST","GET"])
 def matches():
-    return getmatches(request.args.get("account_id") or request.get_json()["account_id"])
-
+    id, column = accountidormatchid(request)
+    if not id:
+        return {}, 404
+    print("here")
+    return getmatches(id,column)
 @app.route("/items",methods=["POST","GET"])
 def items():
-    return gething("items",request.args.get("account_id") or request.get_json()["account_id"])
+    id, column = accountidormatchid(request)
+    if not id:
+        return {}, 404
+    return gething("items",id,column)
 
 @app.route("/events",methods=["POST","GET"])
 def events():
-    return getevents(request.args.get("account_id") or request.get_json()["account_id"])
+    id, column = accountidormatchid(request)
+    if not id:
+        return {}, 404
+    return getevents(id,column=="match_id")
 
 @app.route("/playerdetails",methods=["POST","GET"])
 def details():
@@ -114,6 +139,12 @@ def details():
             return 
         yield json.dumps(gething("chat",account_id))
     return Response(yeilder(), mimetype="application/x-ndjson")
+
+
+@app.errorhandler(404)
+def not_found(e):
+  print("e",(request.path))
+  return "stoopid"
 
 # @app.route("/detailedinfo")
 
