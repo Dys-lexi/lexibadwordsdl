@@ -1,0 +1,295 @@
+import { query } from '$app/server';
+import {
+	API_URL,
+	badwordsResponse,
+	playedwithResponse,
+	profileResponse
+} from '$lib/morestuff/config';
+import type {
+	Aliases,
+	BadWordsResponse,
+	PlayedWithResponse,
+	Userdetails,
+	Playerdeadlock
+} from '$lib/morestuff/types';
+import { error } from '@sveltejs/kit';
+import * as v from 'valibot';
+
+export const getprofile = query(
+	v.object({
+		steam64: v.string(),
+		recall: v.number(),
+		expand: v.boolean()
+	}),
+	async (data) => {
+		if (data.steam64 === '0' || data.steam64 === '00000000000000000') {
+			return {
+				personresults: profileResponse as unknown as Userdetails,
+				statuscode: 200
+			};
+		}
+
+		let profile = {} as Userdetails;
+		// console.log(profile)
+		let status = 500;
+		try {
+			const response = await fetch(`${API_URL}/profile`, {
+				method: 'POST',
+				body: JSON.stringify({ url: data.steam64, expand: data.expand, timeout: data.recall }),
+				headers: { 'Content-Type': 'application/json' }
+			});
+			status = response.status;
+			if (response.ok) {
+				profile = await response.json();
+			} else {
+				error(500);
+			}
+		} catch {
+			// error(500, { message:status.toString()})
+		}
+
+		return { personresults: profile, statuscode: status };
+	}
+);
+
+export const getwordcloud = query(v.string(), async (steam64) => {
+	let status = 500;
+
+	try {
+		const response = await fetch(`${API_URL}/wordcloud/${encodeURIComponent(steam64)}`, {
+			method: 'GET'
+		});
+
+		status = response.status;
+
+		if (!response.ok) {
+			return { profile: '', statuscode: status };
+		}
+
+		const contentType = response.headers.get('content-type') ?? 'image/png';
+		const bytes = new Uint8Array(await response.arrayBuffer());
+		let binary = '';
+
+		for (const byte of bytes) {
+			binary += String.fromCharCode(byte);
+		}
+
+		return { profile: `data:${contentType};base64,${btoa(binary)}`, statuscode: status };
+	} catch {
+		return { profile: '', statuscode: status };
+	}
+});
+
+export const getwordclouddaily = query(v.string(), async (size) => {
+	let status = 500;
+
+	try {
+		const response = await fetch(`${API_URL}/dailywordcloud?size=${size}`, {
+			method: 'GET'
+		});
+
+		status = response.status;
+
+		if (!response.ok) {
+			return { profile: '', statuscode: status };
+		}
+
+		const contentType = response.headers.get('content-type') ?? 'image/png';
+		const bytes = new Uint8Array(await response.arrayBuffer());
+		let binary = '';
+
+		for (const byte of bytes) {
+			binary += String.fromCharCode(byte);
+		}
+
+		return { profile: `data:${contentType};base64,${btoa(binary)}`, statuscode: status };
+	} catch {
+		return { profile: '', statuscode: status };
+	}
+});
+
+export const getaliases = query(v.string(), async (steam64) => {
+	let aliases = {} as Aliases;
+	// console.log(profile)
+	let status = 500;
+	try {
+		const response = await fetch(`${API_URL}/aliases`, {
+			method: 'POST',
+			body: JSON.stringify({ url: steam64 }),
+			headers: { 'Content-Type': 'application/json' }
+		});
+		status = response.status;
+		if (response.ok) {
+			aliases = await response.json();
+		} else {
+			error(500);
+		}
+	} catch {
+		error(500, { message: status.toString() });
+	}
+
+	return { aliases, statuscode: status };
+});
+
+export const nonowords = query(v.string(), async (steam64) => {
+	if (steam64 === '0' || steam64 === '00000000000000000') {
+		return { badwords: badwordsResponse, statuscode: 200 };
+	}
+
+	let badwords = {} as BadWordsResponse;
+	// console.log(profile)
+	let status = 500;
+	try {
+		const response = await fetch(`${API_URL}/badwords`, {
+			method: 'POST',
+			body: JSON.stringify({ url: steam64 }),
+			headers: { 'Content-Type': 'application/json' }
+		});
+		status = response.status;
+		if (response.ok) {
+			badwords = await response.json();
+		} else {
+			error(500);
+		}
+	} catch {
+		error(500, { message: status.toString() });
+	}
+
+	return { badwords, statuscode: status };
+});
+
+export const playedwithdetails = query(
+	v.object({
+		steam64: v.string(),
+		more: v.boolean()
+	}),
+	async (data) => {
+		if (data.steam64 === '0' || data.steam64 === '00000000000000000') {
+			return { playedwithdata: playedwithResponse, statuscode: 200 };
+		}
+
+		let playedwithdata = {} as PlayedWithResponse;
+		// console.log(profile)
+		let status = 500;
+		try {
+			const response = await fetch(`${API_URL}/playedwith`, {
+				method: 'POST',
+				body: JSON.stringify({ url: data.steam64, expand: data.more }),
+				headers: { 'Content-Type': 'application/json' }
+			});
+			status = response.status;
+			if (response.ok) {
+				playedwithdata = await response.json();
+			} else {
+				error(500);
+			}
+		} catch {
+			error(500, { message: status.toString() });
+		}
+
+		return { playedwithdata, statuscode: status };
+	}
+);
+
+export const getbadcontext = query(
+	v.object({
+		matchid: v.number(),
+		index: v.number()
+	}),
+	async (data) => {
+		// console.log("MEOW")
+		let context = {} as BadWordsResponse;
+		// console.log(profile)
+		let status = 500;
+		try {
+			const response = await fetch(`${API_URL}/badcontext`, {
+				method: 'POST',
+				body: JSON.stringify(data),
+				headers: { 'Content-Type': 'application/json' }
+			});
+			status = response.status;
+			if (response.ok) {
+				context.nonowords = await response.json();
+			} else {
+				error(500);
+			}
+		} catch {
+			error(500, { message: status.toString() });
+		}
+
+		return { context, statuscode: status };
+	}
+);
+
+export const logtimeline = query(v.string(), async (steam64) => {
+	// console.log(profile)
+	let status = 500;
+	let timeline = []
+	try {
+		const response = await fetch(`${API_URL}/logtimeline`, {
+			method: 'POST',body: JSON.stringify({url:steam64}),
+				headers: { 'Content-Type': 'application/json' }
+		});
+
+		status = response.status;
+		if (response.ok) {
+			timeline = await response.json();
+		} else {
+			error(500);
+		}
+	} catch {
+		error(500, { message: status.toString() });
+	}
+	return timeline;
+});
+
+export const getlucky = query(async () => {
+	let steam64 = '0';
+	// console.log(profile)
+	let status = 500;
+	try {
+		const response = await fetch(`${API_URL}/lucky`, {
+			method: 'GET'
+		});
+		status = response.status;
+		if (response.ok) {
+			steam64 = await response.text();
+		} else {
+			error(500);
+		}
+	} catch {
+		error(500, { message: status.toString() });
+	}
+
+	return steam64;
+});
+
+
+export const search = query(	v.object({
+		name: v.string(),
+		querycount: v.number()
+	}), async (name) => {
+	// console.log("meow")
+	let status = 500;
+	let people = {} as Array<Playerdeadlock> 
+	let querycount = 0
+	try {
+		const response = await fetch(`${API_URL}/search`, {
+			method: 'POST',body: JSON.stringify(name),
+				headers: { 'Content-Type': 'application/json' }
+		});
+
+		status = response.status;
+		if (response.ok) {
+			let stuff =  await response.json()
+			people = stuff.data;
+			querycount = stuff.querycount;
+		} else {
+			error(500);
+		}
+	} catch {
+		error(500, { message: status.toString() });
+	}
+	// console.log("here")
+	return {people,querycount};
+});

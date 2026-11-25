@@ -30,6 +30,7 @@ def toaccountid(steamid):
 # print(toaccountid(1028429733 ))
 @cached(cache=TTLCache(maxsize=1000, ttl=3600))
 def searchforplayer(name,limit=10,offset=0,strict=False):
+    now = time.time()
     limit = int(limit)
     offset = int(offset)
     # print(toaccountid(name))
@@ -54,7 +55,8 @@ def searchforplayer(name,limit=10,offset=0,strict=False):
             # print("here")
             query.execute("SELECT account_id,personaname,avatar,match_ids,profileurl FROM players WHERE personaname ILIKE %s ORDER BY personaname ILIKE %s DESC,cardinality(match_ids) DESC ,LENGTH(personaname) LIMIT %s OFFSET %s",(f"%{(name).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%",f"{(name).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}",limit,offset))
             output = query.fetchall()
-    return list(map(lambda x: {"account_id":x[0],"personaname":x[1],"avatar":x[2],"match_ids":x[3],"profileurl":x[4]},output))
+    print(f"{time.time() - now:.3f}")
+    return list(map(lambda x: ({"account_id":x[0],"personaname":x[1],"avatar":x[2],"match_ids":x[3],"profileurl":x[4]}),output))
 
 # print(searchforplayer("[U:1:1028429733]"))
 # print(json.dumps(searchforplayer("soft cl"),indent=4))
@@ -100,8 +102,11 @@ def accountidormatchid(request):
 
 @app.route("/search",methods=["POST","GET"])
 def search():
-    return searchforplayer(request.args.get("name") or request.get_json()["name"])
-
+    querycount = request.method == "POST" and request.get_json().get("querycount")
+    if not querycount:
+        return searchforplayer((request.args.get("name") or request.get_json()["name"]).lower())
+    else:
+        return {"querycount":querycount,"data":searchforplayer((request.args.get("name") or request.get_json()["name"]).lower())}
 @app.route("/chat",methods=["POST","GET"])
 def messages():
     id, column = accountidormatchid(request)
@@ -140,11 +145,14 @@ def details():
         yield json.dumps(gething("chat",account_id))
     return Response(yeilder(), mimetype="application/x-ndjson")
 
+@app.route("/lucky")
+def lucky():
+    return "1028429733"
 
 @app.errorhandler(404)
 def not_found(e):
-  print("e",(request.path))
-  return "stoopid"
+#   print("e",(request.path))
+  return "nope",404
 
 # @app.route("/detailedinfo")
 

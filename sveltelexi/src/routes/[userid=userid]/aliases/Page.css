@@ -1,0 +1,6 @@
+.dateholder{
+    display: flex;
+    flex-direction: column;
+    gap:5px;
+    /* background-color: red; */
+}

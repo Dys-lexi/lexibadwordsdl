@@ -120,7 +120,7 @@ services:
     restart: unless-stopped
   deadfront:
     build:
-      context: ./deadfront
+      context: ./sveltelexi
       dockerfile: ./dockerfile
       args:
         VITE_API_URL: http://backend:3440                                                                                                                                                                                                                    

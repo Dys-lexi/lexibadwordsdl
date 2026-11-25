@@ -1,0 +1,228 @@
+
+
+/* form {
+ background-color: red;
+ border-radius: 50px;   
+} */
+
+.nonowordbox{
+    display: flex;
+    /* flex-direction: column; */
+    padding:5px;
+    background-color: rgba(255,255,255,0.05);
+    border-radius: 5px;
+    gap:5px;
+    align-items: center;
+    flex-wrap: wrap;
+    position: relative;
+}
+
+.nonowordmessage{
+    display: flex;
+    flex-wrap: wrap;
+    /* flex: 1 1 auto; */
+    min-width: 0;
+    max-width: 100%;
+}
+.nonowordtimestamp{
+   background-color: rgba(255,255,255,0.05);
+   border-radius: 5px;
+   padding:5px;
+   display: flex;
+   gap:5px
+}
+
+
+
+.nonowordsholder{
+    display: flex;
+    flex-direction:column;
+
+  
+    gap:5px
+}
+
+.nonowordname{
+   /* background-color: rgba(255,255,255,0.05);
+   border-radius: 5px; */
+   /* padding:5px; */
+   color: #aaa;
+   /* min-width: 100px; */
+}
+
+
+.outlinethingy {
+	    background-color: rgba(255,255,255,0.0);
+    border:solid;
+    border-radius: 5px;
+    border-color: rgba(255,255,255,0.05);
+    border-width: 1px;
+    padding: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+
+
+.nonoresultsholder{
+    display: flex;
+    flex-direction: column;
+    gap:15px;
+    padding:15px;
+}
+
+
+.loglink{
+    color: rgb(100,100,200);
+     text-decoration: underline !important;    
+
+}
+
+.colon{
+        color: #eee;
+
+}
+
+.loglink:hover{
+    
+    background-color: rgba(255,255,255,0.05);
+}
+
+.badwordcounter{
+     color: #aaa ;
+       /* font-family: 'Whitney', sans-serif !important; */
+       /* text-decoration-color: rgba(0,0,0,0) !important; */
+}
+
+.expandednameholder{
+    display: flex;
+        height: 70px;
+    gap: 15px;
+  
+}
+
+.playedwithholder{
+       height: auto !important;
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-rows: 500px;
+     column-gap: 5px;
+     row-gap: 5px;
+     overflow-y: hidden;
+     /* padding: 5px; */
+     max-height: 59px;
+}
+
+.playedwithholderholder{
+         border-radius: 5px;
+
+    display: flex;
+
+
+    flex-direction: column;
+    gap:5px;
+
+}
+
+.playedwithholder::-webkit-scrollbar {
+  max-width: 0px;
+  height: 0px;
+  display: none;
+}
+
+.playedwithinfo{
+    display: flex;
+    gap: 5px;
+    width: fit-content;
+    /* padding:5px; */
+}
+
+
+.externalwebsiteholder{
+    gap:15px;
+    display: flex;
+    flex-wrap: wrap;
+}
+.externalwebsite{
+    background-color: rgba(255,255,255,0.05);  
+    position: relative;
+    padding: 10px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    border-radius: 5px;
+    overflow: hidden;
+
+
+}
+
+.playedwithname{
+    padding: 5px;
+    padding-left: 10px;
+    text-decoration: underline;
+}
+
+.goawayoverflow{
+  text-overflow: ellipsis;
+    overflow: hidden;
+
+  white-space: nowrap;
+}
+
+
+
+.bigblurext{
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	/* width: 100vw; */
+	height: calc(100% );
+	object-fit: fill;
+	z-index: -5;
+	width:100%;
+	filter:blur(5px) brightness(20%) saturate(200%);
+	transform: translate(-50%,-50%);
+}
+
+
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position-x: 200%;
+  }
+  100% {
+    background-position-x: 0%;
+  }
+}
+.skellyTheskeleton * {
+ 
+          
+   
+        user-select:none;
+  /* Define the colors as css custom props */
+  --_default-color: rgba(255,255,255,0.02);
+  --_shimmer-color: rgba(180,180,255,0.02);
+  * {
+    /* Apply the animation that moves the background */
+    animation: skeleton-shimmer 3s ease-out infinite;
+    /* Create a background that has a small shimmer "stripe"
+      and tilt it 100 degrees. */
+    background: linear-gradient(
+      100deg,
+      var(--_default-color),
+      var(--_default-color) 50%,
+      var(--_shimmer-color) 60%,
+      var(--_default-color) 70%
+    ) !important;
+    /* Make the background twice the width so we can offset it. */
+    background-size: 200% 100%;
+         border-radius: 5px;
+    color: rgba(0,0,0,0) !important;
+     pointer-events: none;
+        cursor: default;
+  }
+}
+
+.contents{
+    display:contents
+}

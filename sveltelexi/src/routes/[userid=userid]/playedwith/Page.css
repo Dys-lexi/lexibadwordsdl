@@ -1,0 +1,23 @@
+.playedwithholderbig{
+    height: auto !important;
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+  max-height: none;
+    grid-template-rows: auto
+  /* padding: 10px; */
+}
+
+.playedwithpersonsamey{
+    /* width: min(200px , calc(50% - 10px));
+  
+    max-width: 200px; */
+    position: relative;
+    width:100%;
+  
+}
+.goawayoverflow{
+  text-overflow: ellipsis;
+    overflow: hidden;
+
+  white-space: nowrap;
+}

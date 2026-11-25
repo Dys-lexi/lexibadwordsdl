@@ -1,0 +1,395 @@
+.nameholderbad {
+	padding: 10px;
+	background-color: rgba(255, 255, 255, 0.05);
+	display: flex;
+	align-items: flex-start;
+	height: 90px;
+	gap: 10px;
+	justify-content: flex-start;
+	min-width: fit-content;
+	position: relative;
+	overflow: hidden;
+	position: relative;
+	border-radius: 5px;
+}
+.nameholderbad:hover {
+	background-color: rgba(255, 255, 255, 0.05);
+}
+
+.nonowordavatarholder {
+	position: relative;
+	height: 100%;
+	aspect-ratio: 1 / 1;
+	flex: 0 0 auto;
+	min-width: 0;
+}
+
+.nonowordcurrentusername {
+	/* font-family: "Motiva Sans", fantasy, sans-serif !important; */
+	color: rgb(100, 100, 200);
+	text-decoration: underline;
+	max-width: max-content;
+	grid-column-start: 1;
+	grid-column-end: span 2;
+	grid-row: 1;
+}
+.copyimage {
+	grid-column-start: 3;
+	grid-column-end: span 2;
+	grid-row-start: 5;
+	grid-row: 1;
+	height: 18px;
+
+	/* color:red; */
+	/* background-color: blue; */
+	/* backdrop-filter: white; */
+	/* align-self: stretch  */
+}
+.copyimage:hover {
+	grid-column-start: 3;
+	grid-column-end: span 2;
+	grid-row-start: 5;
+	grid-row: 1;
+	height: 18px;
+	filter: brightness(1000%);
+	/* color:red; */
+	/* background-color: blue; */
+	/* backdrop-filter: white; */
+	/* align-self: stretch  */
+}
+.copyimage:active {
+	grid-column-start: 3;
+	grid-column-end: span 2;
+	grid-row-start: 5;
+	grid-row: 1;
+	height: 18px;
+	filter: brightness(80%);
+	/* color:red; */
+	/* background-color: blue; */
+	/* backdrop-filter: white; */
+	/* align-self: stretch  */
+}
+
+.loadingtext {
+	color: #aaa;
+
+	/* font-family: 'Whitney', sans-serif !important; */
+	/* text-decoration-color: rgba(0,0,0,0) !important; */
+}
+.badwordcounterw {
+	color: #aaa;
+	text-overflow: ellipsis;
+	/* overflow: hidden; */
+
+	white-space: nowrap;
+	max-width: max-content;
+	/* font-family: 'Whitney', sans-serif !important; */
+	/* text-decoration-color: rgba(0,0,0,0) !important; */
+}
+.nonowordavatar {
+	height: 100%;
+	/* width:100%; */
+	object-fit: contain;
+	display: block;
+}
+.avatarholder {
+	transform: scale(1.23);
+	position: absolute;
+
+	height: 100%;
+	pointer-events: none;
+}
+
+.profileitems {
+	/* background-color: blue; */
+
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: fit-content(500px);
+	/* grid-template-columns: repeat(auto-fill,fit-content()) [end]; */
+	grid-template-rows: repeat(3, 1fr);
+	height: 100%;
+	gap: 10px;
+	row-gap: 5px;
+	width: 100%;
+}
+.woag {
+	display: flex;
+	position: relative;
+
+	/* background-color: red; */
+}
+.hoverprofile {
+	background-color: rgba(20, 20, 20, 1);
+	border-radius: 5px;
+	display: flex;
+	width: fit-content;
+	/* z-index: 10; */
+	position: fixed;
+	box-shadow: 0px 0px 10px 0px rgba(10, 10, 10, 1);
+	/* top:0;
+	left:0; */
+}
+
+.hoverplease {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	top: 0px;
+	left: 0px;
+	z-index: 10;
+}
+
+.bigblur {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	/* width: 100vw; */
+	height: calc(100%);
+	object-fit: fill;
+	z-index: -5;
+	width: 100%;
+	filter: blur(20px) brightness(20%) saturate(200%);
+	transform: translate(-50%, -50%);
+}
+
+.playedwithperson {
+	/* background-color: rgba(255,255,255,0.02); */
+	flex-grow: 10;
+	/* flex-basis: 1; */
+	overflow: hidden;
+	border-radius: 5px;
+	display: flex;
+	position: relative;
+	align-items: center;
+	color: rgb(100, 100, 200);
+	max-height: 32px;
+}
+.playedwithstats {
+	padding: 2px;
+	height: 22px;
+	max-height: 22px;
+	display: flex;
+	align-items: center;
+}
+.playedwithstatsandwhatnot {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	text-decoration: none;
+	border-width: 1px;
+	border-style: solid;
+	overflow: hidden;
+	border-color: rgba(255, 255, 255, 0.05);
+	align-self: start;
+	border-radius: 5px;
+		  /* content-visibility: auto;
+		  	contain-intrinsic-size: auto 200px; */
+
+}
+
+.playedwithpersonpersonal {
+	background-color: rgba(255, 255, 255, 0.1);
+		  content-visibility: auto;
+}
+
+
+.hidme{
+	content-visibility: auto;
+}
+.playedwithbad {
+	height: 100%;
+
+	background-color: rgba(0, 0, 0, 1) !important;
+	border-radius: 0px !important;
+	/* box-shadow: none !important; */
+}
+.playedwithpercent {
+	position: absolute;
+	width: 5px;
+	background-color: rgba(100, 255, 100, 0.8);
+	bottom: 0px;
+	z-index: -1;
+	left: 32px;
+	border-radius: 1px 1px 0px 0px;
+	/* box-shadow: 0px 0px  2px rgba(100,255,100,0.8); */
+}
+
+.playedwithnumber {
+	position: absolute;
+	top: 0px;
+	left: 0px;
+	z-index: 5;
+}
+
+.playedwithphoto {
+	/* position: absolute; */
+	left: 0px;
+	top: 0px;
+	z-index: -5;
+	height: 32px;
+	width: 32px;
+}
+
+.contexthoverholder {
+	max-width: 500px;
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+.classholder {
+	display: flex;
+	min-height: 0px;
+	overflow: hidden;
+	height: 18px;
+	position: relative;
+}
+.playedaspercent {
+	width: 5px;
+	background-color: rgba(100, 255, 100, 0.8);
+
+	border-radius: 1px 1px 0px 0px;
+	/* box-shadow: 0px 0px  2px rgba(100,255,100,0.8); */
+}
+
+.timelineholder {
+		display: flex;
+	gap: 5px;
+}
+
+.wdqdqdwqdwq{
+	display: flex;
+	gap: 10px;
+	background-color: rgba(255, 255, 255, 0.05);
+	border-radius: 5px;
+	min-width: 0;
+	width: fit-content;
+	padding: 5px;
+	justify-content: space-between;
+	flex-wrap: wrap;
+}
+.timelinetimelineholder {
+	display: flex;
+	gap: 5px;
+	height: 100px;
+	border-radius: 5px;
+	position: relative;
+	
+	/* background-color: rgba(0,0,0,0) !important; */
+}
+
+.yearholder {
+	width: 20px;
+	flex-shrink: 1;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-end;
+	gap: 5px;
+	color: #aaa;
+}
+
+.barholder {
+	display: flex;
+	align-items: flex-end;
+	height: 100%;
+	position: relative;
+	background-color: rgba(255, 255, 255, 0.02);
+	gap: 2px;
+}
+
+.bar {
+	/* position:; */
+	left: 0;
+	bottom: 0;
+	border-radius: 2px;
+	background-color: red;
+	width: 100%;
+}
+
+.barwidth {
+	width: 100%;
+	height: 2px;
+	left: 0;
+	background-color: rgba(255, 255, 255, 0.1);
+	position: absolute;
+	z-index: 9;
+}
+
+.barplot {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: calc(1lh + 5px);
+	left: 0;
+	pointer-events: none;
+}
+
+.barlabelholder {
+	color: #aaa;
+	width: 40px;
+	position: relative;
+	align-self: stretch;
+}
+
+.barlabelsizer {
+	visibility: hidden;
+}
+
+.barlabelplot {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: calc(1lh + 5px);
+	left: 0;
+	pointer-events: none;
+}
+
+.barlabel {
+	position: absolute;
+	right: 50%;
+	transform: translate(50%, 0px);
+	height: 2px;
+	display: flex;
+	align-items: center;
+	color: rgb(200, 80, 80);
+}
+
+.logbarlabelholder .barlabel {
+	/* right: auto; */
+	/* left: 0; */
+	color: rgb(100, 100, 200);
+}
+
+.badwordhovercount {
+	color: rgb(200, 80, 80);
+	
+}
+
+.loghovercount {
+	color: rgb(100, 100, 200);
+
+}
+
+.verticalstuff {
+	display: flex;
+	flex-direction: column;
+}
+
+.keybar{
+	display: flex;
+	gap:3px;
+	align-items: center;
+}
+
+.keyboxbar{
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+.keybox {
+	width: 10px;
+	height: 10px;
+	border-radius: 2px;
+}

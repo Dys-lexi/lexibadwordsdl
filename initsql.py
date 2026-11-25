@@ -300,7 +300,7 @@ def init():
 
     #         lastcheckedtimestamp BIGINT,
     #         steamid BIGINT
-
+    
 
     #     )"""
     # )
@@ -426,9 +426,10 @@ def init():
     # c.execute("CREATE INDEX IF NOT EXISTS idx_messages_flaggedtrusted ON messages (trusted)")
     # # print("veee")
 
-    # c.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-
-    # c.execute("CREATE INDEX IF NOT EXISTS idx_usernames_name_trgm ON usernames USING GIN (name gin_trgm_ops)")
+    c.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    # print("e")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_players_personaname_trgm ON players USING GIN (personaname gin_trgm_ops)")
+    # print("w")
     # c.execute("CREATE INDEX IF NOT EXISTS idx_usernames_steamid ON usernames (steamid)")
     conn.commit()
     pgpool.putconn(conn)
