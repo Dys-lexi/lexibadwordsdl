@@ -26,8 +26,16 @@ struct Coordinator {
 
 impl Coordinator {
     fn from_env() -> Result<Self, Error> {
-        let endpoint = env::var("COORDINATOR_ENDPOINT")
-            .map_err(|_| io::Error::other("COORDINATOR_ENDPOINT is required"))?;
+        fn setting(name: &str, default: &str) -> Result<String, io::Error> {
+            match env::var(name) {
+                Ok(value) if !value.is_empty() => Ok(value),
+                Ok(_) | Err(env::VarError::NotPresent) => Ok(default.to_owned()),
+                Err(env::VarError::NotUnicode(_)) => {
+                    Err(io::Error::other(format!("{name} must be valid UTF-8")))
+                }
+            }
+        }
+        let endpoint = setting("COORDINATOR_ENDPOINT", "https://deadlock.lexi.tf:443/haste")?;
         let base =
             Url::parse(&endpoint).map_err(|_| io::Error::other("invalid COORDINATOR_ENDPOINT"))?;
         if !matches!(base.scheme(), "http" | "https")
@@ -44,14 +52,13 @@ impl Coordinator {
             url.path_segments_mut().unwrap().pop_if_empty().push(name);
             url
         };
-        let token = env::var("TOKEN")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .ok_or("TOKEN is required")?;
+        let token = setting("TOKEN", "unknown")?;
+        if token.trim().is_empty() {
+            return Err("TOKEN must contain a non-whitespace character".into());
+        }
         let mut token = HeaderValue::from_str(&token)?;
         token.set_sensitive(true);
-        let surplus = env::var("DEMO_SURPLUS")
-            .unwrap_or_else(|_| "0".into())
+        let surplus = setting("DEMO_SURPLUS", "10")?
             .parse::<usize>()
             .map_err(|_| io::Error::other("DEMO_SURPLUS must be a nonnegative integer"))?;
         Ok(Self {

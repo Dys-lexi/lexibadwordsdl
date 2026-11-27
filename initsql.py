@@ -278,6 +278,19 @@ def init():
     personaname TEXT,
     PRIMARY KEY (account_id)
     )""")
+
+    c.execute("""CREATE TABLE IF NOT EXISTS playermatches (
+    match_id INTEGER,
+    account_id INTEGER,
+    PRIMARY KEY (account_id,match_id)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS aliases (
+    last_match_id, INTEGER,
+    first_match_id INTEGER,
+    account_id INTEGER,
+    personaname TEXT,
+    PRIMARY KEY (account_id,personaname)
+    )""")
     c.execute("ALTER TABLE chat ADD COLUMN IF NOT EXISTS tick INTEGER")
     c.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS tick INTEGER")
     # print("making indexes")

@@ -1,7 +1,8 @@
 # Haste coordinator client
 
-Set `COORDINATOR_ENDPOINT` and `TOKEN` in the repository's `.env`, then start Haste
-from the repository root with `docker compose up --build -d haste`.
+Start Haste from the repository root with `docker compose up --build -d haste`.
+The client uses the coordinator defaults below when the corresponding environment
+variables are unset or empty.
 
 Haste keeps one shared queue of replay URLs. Each free worker takes the next URL.
 Haste keeps up to `DEMO_SURPLUS` URLs waiting in addition to active work.
@@ -135,9 +136,9 @@ Configuration (environment variables):
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `COORDINATOR_ENDPOINT` | required | Coordinator base URL including any path prefix |
-| `TOKEN` | required | Shared coordinator token |
-| `DEMO_SURPLUS` | `0` | Target number of URLs waiting for a worker |
+| `COORDINATOR_ENDPOINT` | `https://deadlock.lexi.tf:443/haste` | Coordinator base URL including any path prefix |
+| `TOKEN` | `unknown` | Shared coordinator token |
+| `DEMO_SURPLUS` | `10` | Target number of URLs waiting for a worker |
 | `MAX_DOWNLOAD_BYTES` | `536870912` | Maximum downloaded size (512 MiB) |
 | `MAX_DOWNLOAD_SPEED` | `0` | Combined replay download rate in Mbps (`0` is unlimited) |
 | `MAX_DEMO_BYTES` | `2147483648` | Maximum decompressed size (2 GiB) |
@@ -153,7 +154,6 @@ decompressed demo, parser state, and JSON output per worker.
 To run locally with Rust and `protoc` installed:
 
 ```sh
-# Export COORDINATOR_ENDPOINT and TOKEN first.
 cargo run --release --bin haste-client
 cargo test -p haste --locked
 ```
