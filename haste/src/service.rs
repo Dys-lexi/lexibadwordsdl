@@ -16,6 +16,7 @@ use tokio::sync::Semaphore;
 
 use crate::runners::{self, Runner};
 
+pub mod coordinator;
 mod download;
 
 #[derive(Clone, Debug)]
@@ -164,7 +165,7 @@ fn url_allowed(url: &Url, overrides: &[String]) -> bool {
         .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
 }
 
-pub fn router(config: Config) -> Result<Router, reqwest::Error> {
+fn app_state(config: Config) -> Result<AppState, reqwest::Error> {
     let hosts = config.allowed_replay_hosts.clone();
     let client = Client::builder()
         .user_agent("haste-demo-service/0.1")
@@ -192,11 +193,15 @@ pub fn router(config: Config) -> Result<Router, reqwest::Error> {
             }
         }))
         .build()?;
-    let state = AppState {
+    Ok(AppState {
         replay_client: Arc::new(download::ReplayClient::new(client, &config)),
         slots: Arc::new(Semaphore::new(config.max_concurrent_requests)),
         config: Arc::new(config),
-    };
+    })
+}
+
+pub fn router(config: Config) -> Result<Router, reqwest::Error> {
+    let state = app_state(config)?;
     Ok(Router::new()
         .route("/", post(parse))
         .route("/parse", post(parse))
@@ -256,6 +261,11 @@ async fn parse(
             "match_start_unix must be finite, nonnegative Unix seconds",
         ));
     }
+    let body = process_demo(&state, request).await?;
+    Ok(([(header::CONTENT_TYPE, "application/json")], body).into_response())
+}
+
+async fn process_demo(state: &AppState, request: ParseRequest) -> Result<String, ApiError> {
     let url = Url::parse(&request.url).map_err(|error| {
         ApiError::new(StatusCode::BAD_REQUEST, "invalid_url", error.to_string())
     })?;
@@ -286,7 +296,7 @@ async fn parse(
         let _permit = permit;
         let processing_start = std::time::Instant::now();
         download_log.event("processing_started", json!({}));
-        let result: Result<Response, ApiError> = (|| {
+        let result: Result<String, ApiError> = (|| {
             let demo = decompress(compressed, config.max_demo_bytes)?;
             download_log.event("decompression_completed", json!({
                 "decompressed_bytes": demo.len(),
@@ -309,7 +319,7 @@ async fn parse(
                     error.to_string(),
                 )
             })?;
-            Ok(([(header::CONTENT_TYPE, "application/json")], body).into_response())
+            Ok(body)
         })();
         match &result {
             Ok(_) => download_log.event("request_completed", json!({"processing_seconds": processing_start.elapsed().as_secs_f64()})),

@@ -3,11 +3,11 @@ services:
     build:
       context: ./haste/
       dockerfile: Dockerfile
-    ports:
-      - "${PORT:-80}:80"
     pull_policy: always
     environment:
-      BIND_ADDR: "0.0.0.0:80"
+      COORDINATOR_ENDPOINT: "${COORDINATOR_ENDPOINT:-}"
+      TOKEN: "${TOKEN:-}"
+      DEMO_SURPLUS: "${DEMO_SURPLUS:-0}"
       MAX_DOWNLOAD_BYTES: "${MAX_DOWNLOAD_BYTES:-536870912}"
       MAX_DOWNLOAD_SPEED:  "${MAX_DOWNLOAD_SPEED:-0}"
       MAX_DEMO_BYTES: "${MAX_DEMO_BYTES:-2147483648}"
@@ -134,3 +134,15 @@ services:
       - 3001:80
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+  adapter:
+    build:
+      context: ../hastebindings
+      dockerfile_inline: |
+        FROM python:3.13-slim
+        RUN python -m pip install --no-cache-dir 'aiohttp>=3.13.3,<4'
+    command: ["python", "-u", "/app/haste_adapter.py"]
+    volumes:
+      - ../hastebindings/haste_adapter.py:/app/haste_adapter.py:ro
+    ports:
+      - "4818:4818"
+    restart: unless-stopped

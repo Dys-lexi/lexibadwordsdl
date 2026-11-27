@@ -2,7 +2,7 @@
 name = "haste"
 version = "0.0.0"
 edition.workspace = true
-default-run = "haste-server"
+default-run = "haste-client"
 
 [workspace]
 members = ["crates/*"]
@@ -64,8 +64,8 @@ tower = { version = "0.5.3", features = ["util"] }
 strip = true
 
 [[bin]]
-name = "haste-server"
-path = "src/bin/haste-server.rs"
+name = "haste-client"
+path = "src/bin/haste-client.rs"
 
 [lints]
 workspace = true

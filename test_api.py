@@ -12,6 +12,7 @@ print("started")
 lock = threading.Lock()
 lexiesiplist = {
             "http://haste:80":{"healthy":False,"maxrequests":0},
+            "http://adapter:80":{"healthy":False,"maxrequests":0},
             "http://portablefakeserver:80":{"healthy":False,"maxrequests":0},
             "http://fish.tail99fc5d.ts.net:7543":{"healthy":False,"maxrequests":0},
             "http://dublex-1:80":{"healthy":False,"maxrequests":0},
