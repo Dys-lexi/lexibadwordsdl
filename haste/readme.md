@@ -231,11 +231,16 @@ haste's entity representatin is not debugger / print friendly, you would want to
 use [haste-inspector](https://github.com/blukai/haste-inspector) (replay dev
 tools) to explore all the entities that are present in replays.
 
-## feature flags
+## Build features
 
-- `broadcast`: enables http broadcasts.
-- `deadlock`: enables deadlock protos and some utilities.
-- `dota2`: enabled dota2 protos and some utilities.
+The default build produces the coordinator client and its replay parser.
+Optional library features can be enabled with `cargo build --features <name>`.
+
+- `http-service` enables the Axum router and both analysis runners.
+- `demo-check` enables the diagnostic demo-check runner.
+- `broadcast` enables the live broadcast client.
+- `full-protos` includes the broader Valve message definitions exposed by the library.
+- `async` enables the asynchronous streaming parser.
 
 ## benchmarks
 

@@ -285,7 +285,7 @@ def init():
     PRIMARY KEY (account_id,match_id)
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS aliases (
-    last_match_id, INTEGER,
+    last_match_id INTEGER,
     first_match_id INTEGER,
     account_id INTEGER,
     personaname TEXT,

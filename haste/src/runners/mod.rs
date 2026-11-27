@@ -2,20 +2,22 @@
 
 use std::io::{self, Cursor};
 
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 pub mod chat_messages;
 mod death_events;
+#[cfg(feature = "demo-check")]
 pub mod demo_check;
 mod hero_snapshots;
 mod match_details;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "http-service", derive(serde::Deserialize, serde::Serialize))]
 pub enum Runner {
-    #[serde(rename = "deadlock-chat-messages")]
+    #[cfg_attr(feature = "http-service", serde(rename = "deadlock-chat-messages"))]
     ChatMessages,
-    #[serde(rename = "deadlock-demo-check")]
+    #[cfg(feature = "demo-check")]
+    #[cfg_attr(feature = "http-service", serde(rename = "deadlock-demo-check"))]
     DemoCheck,
 }
 
@@ -23,6 +25,7 @@ impl Runner {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ChatMessages => "deadlock-chat-messages",
+            #[cfg(feature = "demo-check")]
             Self::DemoCheck => "deadlock-demo-check",
         }
     }
@@ -48,6 +51,7 @@ pub fn analyze(
         let reader = Cursor::new(demo);
         let value = match runner {
             Runner::ChatMessages => chat_messages::run(reader, match_start_unix)?,
+            #[cfg(feature = "demo-check")]
             Runner::DemoCheck => demo_check::run(reader)?,
         };
         results.insert(runner.name().to_owned(), value);

@@ -13,7 +13,7 @@ edition = "2024"
 
 [workspace.dependencies]
 haste_broadcast = { path = "crates/haste_broadcast" }
-haste_core = { path = "crates/haste_core" }
+haste_core = { path = "crates/haste_core", default-features = false }
 haste_vartype = { path = "crates/haste_vartype" }
 dungers = { path = "crates/dungers" }
 dungers_bitbuf = { path = "crates/dungers_bitbuf" }
@@ -38,26 +38,33 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }
 unsafe_op_in_unsafe_fn = "deny"
 
 [features]
+broadcast = ["dep:haste_broadcast"]
+demo-check = []
+full-protos = ["haste_core/full-protos"]
+http-service = ["dep:axum", "dep:serde", "demo-check"]
 # Async, source-driven streaming parser (AsyncStreamingParser + AsyncDemoStream
 # implementations). Forwards to haste_core's async feature.
 async = ["haste_core/async"]
 
 [dependencies]
-haste_broadcast.workspace = true
+haste_broadcast = { workspace = true, optional = true }
 haste_core.workspace = true
 base64.workspace = true
 prost.workspace = true
-serde.workspace = true
+serde = { workspace = true, optional = true }
 serde_json.workspace = true
 thiserror.workspace = true
-axum = "0.8.9"
+axum = { version = "0.8.9", optional = true, default-features = false, features = ["json"] }
 bzip2 = "0.6"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-zstd = "0.14"
+zstd = { version = "0.14", default-features = false, features = ["legacy"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 tokio = { workspace = true, features = ["net", "signal", "sync", "time"] }
 
 [dev-dependencies]
+# Exercise the optional HTTP router in the integration suite.
+haste = { path = ".", features = ["http-service"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "json"] }
 tower = { version = "0.5.3", features = ["util"] }
 
 [profile.release]

@@ -18,7 +18,7 @@
     )
 )]
 
-#[cfg(feature = "user-msgs")]
+#[cfg(feature = "replay")]
 pub mod common {
     #![allow(
         clippy::all,

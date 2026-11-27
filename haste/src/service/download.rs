@@ -1,7 +1,6 @@
 use super::{ApiError, Config};
-use axum::http::{StatusCode, header};
 use futures_util::{StreamExt as _, stream::FuturesUnordered};
-use reqwest::{Client, Response, Url};
+use reqwest::{Client, Response, StatusCode, Url, header};
 use serde_json::{Value, json};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};

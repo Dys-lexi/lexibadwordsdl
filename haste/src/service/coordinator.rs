@@ -2,8 +2,10 @@
 
 use std::{collections::VecDeque, env, io, time::Duration};
 
-use axum::http::{HeaderValue, header};
-use reqwest::{Client, Response, Url};
+use reqwest::{
+    Client, Response, Url,
+    header::{self, HeaderValue},
+};
 use serde_json::json;
 use tokio::{
     sync::mpsc,

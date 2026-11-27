@@ -4,6 +4,8 @@ version = "0.0.0"
 edition.workspace = true
 
 [features]
+default = ["full-protos"]
+full-protos = ["valveprotos/user-msgs"]
 # Async, source-driven streaming parser (AsyncStreamingParser + AsyncDemoStream
 # implementations). Pulls in tokio and bytes.
 async = ["dep:tokio", "dep:bytes"]
@@ -16,7 +18,7 @@ nohash.workspace = true
 prost.workspace = true
 snap.workspace = true
 thiserror.workspace = true
-valveprotos = { workspace = true, features = ["user-msgs"] }
+valveprotos = { workspace = true, features = ["replay"] }
 
 bytes = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["io-util", "sync"], optional = true }

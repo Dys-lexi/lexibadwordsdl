@@ -14,14 +14,16 @@ fn required_protos() -> Vec<&'static str> {
         "usercmd.proto",
         "citadel_usercmd.proto",
         "citadel_gameevents.proto",
-        "citadel_usermessages.proto",
         "citadel_gcmessages_client.proto",
+        "usermessages.proto",
+    ]);
+    #[cfg(feature = "replay")]
+    protos.extend(&[
         "demo.proto",
         "netmessages.proto",
-        "usermessages.proto",
-        "gameevents.proto",
         "networkbasetypes.proto",
-        "network_connection.proto",
+        "gameevents.proto",
+        "citadel_usermessages.proto",
     ]);
     #[cfg(feature = "gc-common")]
     protos.extend(&[
