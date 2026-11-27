@@ -929,3 +929,155 @@ async fn small_replay_with_range_support_uses_a_single_full_transfer() {
 async fn oversized_replay_is_rejected_before_opening_range_workers() {
     ranged_replay_case(9, false, 8 * 1024 * 1024, 0).await;
 }
+
+#[tokio::test]
+async fn coordinator_shares_queued_urls_and_submits_the_parse_response() {
+    use axum::{Json, extract::Path, routing::post};
+    use std::process::{Child, Command};
+    use tokio::sync::{Semaphore, mpsc};
+
+    struct ClientProcess(Child);
+    impl Drop for ClientProcess {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn demo(id: u64) -> Vec<u8> {
+        with_match_info(
+            chat_demo(),
+            MatchInfo {
+                match_id: Some(id),
+                ..Default::default()
+            },
+        )
+    }
+
+    // Control demo completion independently of the coordinator refill.
+    let gate = Arc::new(Semaphore::new(0));
+    let blocked = gate.clone();
+    let replay = upstream(
+        Router::new()
+            .route(
+                "/slow/{id}",
+                get(move |Path(id): Path<u64>, headers: HeaderMap| {
+                    let blocked = blocked.clone();
+                    async move {
+                        assert!(!headers.contains_key("token"));
+                        blocked.acquire().await.unwrap().forget();
+                        demo(id)
+                    }
+                }),
+            )
+            .route(
+                "/fast",
+                get(|headers: HeaderMap| async move {
+                    assert!(!headers.contains_key("token"));
+                    demo(4)
+                }),
+            ),
+    )
+    .await;
+    let base = replay.url.trim_end_matches("/demo.dem.bz2");
+    let fast = format!("{base}/fast");
+    let slow = format!("{base}/slow");
+    let (_, expected) = request(
+        router(config()).unwrap(),
+        json!({"url": fast, "run": ["deadlock-chat-messages"]}),
+    )
+    .await;
+
+    let (polls, mut counts) = mpsc::unbounded_channel();
+    let (submissions, mut bodies) = mpsc::unbounded_channel();
+    let coordinator = upstream(
+        Router::new()
+            .route(
+                "/abc/geturls",
+                post(move |headers: HeaderMap, Json(body): Json<Value>| {
+                    assert_eq!(headers["token"], "test-token");
+                    let (reply, response) = tokio::sync::oneshot::channel::<Vec<String>>();
+                    polls.send((body, reply)).unwrap();
+                    async move { Json(response.await.unwrap()) }
+                }),
+            )
+            .route(
+                "/abc/submitdemo",
+                post(move |headers: HeaderMap, Json(body): Json<Value>| {
+                    assert_eq!(headers["token"], "test-token");
+                    let (reply, response) = tokio::sync::oneshot::channel::<StatusCode>();
+                    submissions.send((body, reply)).unwrap();
+                    async move { response.await.unwrap() }
+                }),
+            ),
+    )
+    .await;
+
+    let _client = ClientProcess(
+        Command::new(env!("CARGO_BIN_EXE_haste-client"))
+            .env("TOKEN", "test-token")
+            .env(
+                "COORDINATOR_ENDPOINT",
+                coordinator.url.replace("/demo.dem.bz2", "/abc"),
+            )
+            .env("DEMO_SURPLUS", "2")
+            .env("MAX_CONCURRENT_REQUESTS", "2")
+            .env("ALLOWED_REPLAY_HOSTS", "127.0.0.1")
+            .spawn()
+            .unwrap(),
+    );
+    tokio::time::timeout(Duration::from_secs(45), async {
+        let (count, first) = counts.recv().await.unwrap();
+        assert_eq!(count, json!({"count": 4}));
+        first
+            .send((1..=3).map(|id| format!("{slow}/{id}")).collect())
+            .unwrap();
+
+        // Two workers are busy and one URL is waiting: refill just the missing URL.
+        let (count, refill) = counts.recv().await.unwrap();
+        assert_eq!(count, json!({"count": 1}));
+        gate.add_permits(1);
+        let (single, reply) = bodies.recv().await.unwrap();
+        assert_eq!(single.as_array().unwrap().len(), 1);
+        reply.send(StatusCode::SERVICE_UNAVAILABLE).unwrap();
+        assert!(counts.try_recv().is_err());
+        let empty_at = std::time::Instant::now();
+        refill.send(vec![]).unwrap();
+
+        gate.add_permits(2);
+        // Recover after repeated failures. All three matches travel in one request.
+        let (batch, reply) = bodies.recv().await.unwrap();
+        assert_eq!(batch[0], single[0]);
+        reply.send(StatusCode::SERVICE_UNAVAILABLE).unwrap();
+        let (batch, reply) = bodies.recv().await.unwrap();
+        let mut ids: Vec<_> = batch
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| {
+                entry["results"]["deadlock-chat-messages"]["match"]["match_id"]
+                    .as_u64()
+                    .unwrap()
+            })
+            .collect();
+        ids.sort_unstable();
+        assert_eq!(ids, [1, 2, 3]);
+        reply.send(StatusCode::NO_CONTENT).unwrap();
+
+        let (count, refill) = counts.recv().await.unwrap();
+        assert!(empty_at.elapsed() >= Duration::from_secs(30));
+        assert_eq!(count, json!({"count": 4}));
+        refill.send(vec![format!("{slow}/4")]).unwrap();
+
+        // A short response occupies one slot and leaves three URLs missing.
+        let (count, refill) = counts.recv().await.unwrap();
+        assert_eq!(count, json!({"count": 3}));
+        refill.send(vec![]).unwrap();
+        gate.add_permits(1);
+        let (batch, reply) = bodies.recv().await.unwrap();
+        assert_eq!(batch, json!([expected]));
+        reply.send(StatusCode::NO_CONTENT).unwrap();
+    })
+    .await
+    .unwrap();
+}

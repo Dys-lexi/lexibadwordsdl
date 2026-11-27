@@ -172,3 +172,4 @@ dump
 *.bz2
 *.zst
 *.zip
+*.txt

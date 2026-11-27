@@ -1,22 +1,27 @@
 //! Outbound coordinator protocol for replay workers.
 
-use std::{env, io, sync::Arc, time::Duration};
+use std::{collections::VecDeque, env, io, time::Duration};
 
 use axum::http::{HeaderValue, header};
 use reqwest::{Client, Response, Url};
 use serde_json::json;
-use tokio::{sync::watch, task::JoinSet, time::sleep};
+use tokio::{
+    sync::mpsc,
+    task::JoinSet,
+    time::{Instant, sleep, sleep_until},
+};
 
-use super::{AppState, Config, ParseRequest, Runner, app_state, process_demo};
+use super::{Config, ParseRequest, Runner, app_state, process_demo};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
-const POLL_DELAY: Duration = Duration::from_secs(2);
+const EMPTY_QUEUE_DELAY: Duration = Duration::from_secs(30);
+const RETRY_DELAY: Duration = Duration::from_secs(2);
 
 struct Coordinator {
     client: Client,
     get_urls: Url,
     submit_demo: Url,
-    count: usize,
+    surplus: usize,
 }
 
 impl Coordinator {
@@ -62,7 +67,7 @@ impl Coordinator {
                 .build()?,
             get_urls: route("geturls"),
             submit_demo: route("submitdemo"),
-            count: surplus.checked_add(1).ok_or("DEMO_SURPLUS is too large")?,
+            surplus,
         })
     }
 
@@ -80,75 +85,119 @@ impl Coordinator {
         Ok(response)
     }
 
-    async fn get_urls(&self) -> Result<Vec<String>, Error> {
+    async fn get_urls(&self, count: usize) -> Result<Vec<String>, Error> {
         let response = self
-            .post(&self.get_urls, json!({"count": self.count}).to_string())
+            .post(&self.get_urls, json!({"count": count}).to_string())
             .await?;
-        Ok(serde_json::from_slice(&response.bytes().await?)?)
-    }
-
-    async fn process(&self, state: &AppState, url: String) {
-        let request = ParseRequest {
-            url,
-            run: vec![Runner::ChatMessages],
-            match_start_unix: None,
-        };
-        let body = match process_demo(state, request).await {
-            Ok(body) => axum::body::Bytes::from(body),
-            Err(error) => {
-                eprintln!("replay failed ({}): {}", error.code, error.message);
-                return;
-            }
-        };
-        let mut delay = POLL_DELAY;
-        while let Err(error) = self.post(&self.submit_demo, body.clone()).await {
-            eprintln!("submitdemo failed, retrying in {delay:?}: {error}");
-            sleep(delay).await;
-            delay = (delay * 2).min(Duration::from_secs(60));
+        let body = response.bytes().await?;
+        if body.is_empty() {
+            return Ok(Vec::new());
         }
+        Ok(serde_json::from_slice(&body)?)
     }
 
-    async fn worker(&self, state: AppState, mut stop: watch::Receiver<bool>) {
-        while !*stop.borrow() {
-            match self.get_urls().await {
-                Ok(urls) if !urls.is_empty() => {
-                    for url in urls {
-                        self.process(&state, url).await;
-                    }
-                    continue;
+    async fn submit_completed(&self, mut completed: mpsc::UnboundedReceiver<String>) {
+        while let Some(first) = completed.recv().await {
+            let mut batch = String::from("[");
+            batch.push_str(&first);
+            drop(first);
+            let mut delay = RETRY_DELAY;
+            loop {
+                // Each worker sends one complete, already serialized JSON object.
+                while let Ok(result) = completed.try_recv() {
+                    batch.push(',');
+                    batch.push_str(&result);
                 }
-                Ok(_) => {}
-                Err(error) => eprintln!("geturls failed: {error}"),
-            }
-            tokio::select! {
-                _ = sleep(POLL_DELAY) => {},
-                _ = stop.changed() => return,
+                batch.push(']');
+                match self.post(&self.submit_demo, batch.clone()).await {
+                    Ok(_) => break,
+                    Err(error) => {
+                        batch.pop();
+                        eprintln!("submitdemo failed, retrying in {delay:?}: {error}");
+                        sleep(delay).await;
+                        delay = (delay * 2).min(Duration::from_secs(60));
+                    }
+                }
             }
         }
     }
 }
 
 pub async fn run(config: Config, shutdown: impl Future<Output = ()>) -> Result<(), Error> {
-    let coordinator = Arc::new(Coordinator::from_env()?);
+    let coordinator = Coordinator::from_env()?;
+    let (completed, receiver) = mpsc::unbounded_channel();
+    let (result, ()) = tokio::join!(
+        process_urls(config, &coordinator, completed, shutdown),
+        coordinator.submit_completed(receiver),
+    );
+    result
+}
+
+async fn process_urls(
+    config: Config,
+    coordinator: &Coordinator,
+    completed: mpsc::UnboundedSender<String>,
+    shutdown: impl Future<Output = ()>,
+) -> Result<(), Error> {
+    let capacity = config.max_concurrent_requests;
+    let target = capacity
+        .checked_add(coordinator.surplus)
+        .ok_or("DEMO_SURPLUS is too large")?;
     let state = app_state(config)?;
     let mut workers = JoinSet::new();
-    let (stop, _) = watch::channel(false);
-    for _ in 0..state.config.max_concurrent_requests {
-        let coordinator = Arc::clone(&coordinator);
-        let state = state.clone();
-        let receiver = stop.subscribe();
-        workers.spawn(async move { coordinator.worker(state, receiver).await });
+    let mut waiting = VecDeque::new();
+    let mut next_poll = Instant::now();
+    let mut refill = None;
+    let mut stopping = false;
+    tokio::pin!(shutdown);
+    loop {
+        while let Some(worker) = workers.try_join_next() {
+            worker??;
+        }
+        while workers.len() < capacity {
+            let Some(url) = waiting.pop_front() else {
+                break;
+            };
+            let completed = completed.clone();
+            let state = state.clone();
+            workers.spawn(async move {
+                let request = ParseRequest {
+                    url,
+                    run: vec![Runner::ChatMessages],
+                    match_start_unix: None,
+                };
+                match process_demo(&state, request).await {
+                    Ok(body) => completed
+                        .send(body)
+                        .map_err(|_| "submission queue closed")?,
+                    Err(error) => eprintln!("replay failed ({}): {}", error.code, error.message),
+                }
+                Ok::<(), Error>(())
+            });
+        }
+        if stopping && workers.is_empty() && refill.is_none() {
+            return Ok(());
+        }
+        let missing = (target - workers.len()).saturating_sub(waiting.len());
+        tokio::select! {
+            biased;
+            _ = &mut shutdown, if !stopping => stopping = true,
+            Some(worker) = workers.join_next(), if !workers.is_empty() => worker??,
+            result = async { refill.as_mut().unwrap().await }, if refill.is_some() => {
+                let result: Result<Vec<String>, Error> = result;
+                refill = None;
+                match result {
+                    Ok(urls) if !urls.is_empty() => waiting.extend(urls),
+                    Ok(_) => next_poll = Instant::now() + EMPTY_QUEUE_DELAY,
+                    Err(error) => {
+                        eprintln!("geturls failed: {error}");
+                        next_poll = Instant::now() + RETRY_DELAY;
+                    }
+                }
+            }
+            _ = sleep_until(next_poll), if !stopping && missing > 0 && refill.is_none() => {
+                refill = Some(Box::pin(coordinator.get_urls(missing)));
+            }
+        }
     }
-    tokio::select! {
-        _ = shutdown => {},
-        Some(worker) = workers.join_next() => {
-            worker?;
-            return Err("coordinator worker exited unexpectedly".into());
-        },
-    }
-    stop.send_replace(true);
-    while let Some(worker) = workers.join_next().await {
-        worker?;
-    }
-    Ok(())
 }

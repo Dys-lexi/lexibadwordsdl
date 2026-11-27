@@ -1,0 +1,58 @@
+{
+  "base_url_example": "https://xyz.com:443/abc",
+  "authentication": "Replace ${TOKEN} with the raw value of the TOKEN environment variable. Both routes are relative to COORDINATOR_ENDPOINT, including its path prefix.",
+  "geturls": {
+    "request": {
+      "method": "POST",
+      "url": "https://xyz.com:443/abc/geturls",
+      "headers": {
+        "token": "${TOKEN}",
+        "Content-Type": "application/json",
+        "Accept": "*/*"
+      },
+      "body_example": { "count": 3 },
+      "count": "Positive integer equal to free worker slots plus DEMO_SURPLUS minus URLs already waiting. Haste sends at most one refill request at a time."
+    },
+    "expected_response": {
+      "success_status": "Any 2xx",
+      "body": "A JSON array of replay URL strings. The coordinator can return fewer than count. Each URL must use HTTP or HTTPS and an allowed replay host.",
+      "example": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "body": ["https://replay392.valve.net/1422450/134763078_1198627193.dem.bz2"]
+      },
+      "no_work_example": { "status": 200, "body": [] },
+      "client_behavior": "Haste queues every URL in a partial batch and requests the remaining shortfall. An empty array or an empty 2xx response body delays the next poll by 30 seconds. A failed request or malformed response delays it by 2 seconds."
+    }
+  },
+  "submitdemo": {
+    "request": {
+      "method": "POST",
+      "url": "https://xyz.com:443/abc/submitdemo",
+      "headers": {
+        "token": "${TOKEN}",
+        "Content-Type": "application/json",
+        "Accept": "*/*"
+      },
+      "body": "A nonempty JSON array with one complete parser result per match. Even a single result is wrapped in an array. The example abbreviates the match metadata.",
+      "body_example": [
+        {
+          "results": {
+            "deadlock-chat-messages": {
+              "match": { "match_id": 134763078 },
+              "chat": [],
+              "events": [],
+              "items": []
+            }
+          }
+        }
+      ]
+    },
+    "expected_response": {
+      "success_status": "Any 2xx acknowledges the whole batch.",
+      "body": "Optional. Haste ignores the response body.",
+      "example": { "status": 204 },
+      "client_behavior": "After a network failure or non-2xx response, Haste keeps the batch in memory and includes newly completed matches in the retry. Retries start after 2 seconds and double up to 60 seconds. If an acknowledgement is lost, the coordinator may receive a match again."
+    }
+  }
+}

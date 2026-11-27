@@ -40,4 +40,4 @@ if [ "${MAX_DOWNLOAD_SPEED:-0}" != 0 ]; then
     fi
 fi
 
-exec haste-server "$@"
+exec haste-client "$@"

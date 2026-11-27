@@ -5,15 +5,15 @@ services:
       dockerfile: Dockerfile
     pull_policy: always
     environment:
-      COORDINATOR_ENDPOINT: "${COORDINATOR_ENDPOINT:-}"
+      COORDINATOR_ENDPOINT: "${COORDINATOR_ENDPOINT:-https://deadlock.lexi.tf:443/haste}"
       TOKEN: "${TOKEN:-}"
-      DEMO_SURPLUS: "${DEMO_SURPLUS:-0}"
+      DEMO_SURPLUS: "${DEMO_SURPLUS:-5}"
       MAX_DOWNLOAD_BYTES: "${MAX_DOWNLOAD_BYTES:-536870912}"
       MAX_DOWNLOAD_SPEED:  "${MAX_DOWNLOAD_SPEED:-0}"
       MAX_DEMO_BYTES: "${MAX_DEMO_BYTES:-2147483648}"
       MAX_CONCURRENT_REQUESTS: "${MAX_CONCURRENT_REQUESTS:-1}"
-      DOWNLOAD_READ_TIMEOUT_SECONDS: "${DOWNLOAD_READ_TIMEOUT_SECONDS:-30}"
-      ALLOWED_REPLAY_HOSTS: "${ALLOWED_REPLAY_HOSTS:-}"
+      DOWNLOAD_READ_TIMEOUT_SECONDS: "${DOWNLOAD_READ_TIMEOUT_SECONDS:-300}"
+      # ALLOWED_REPLAY_HOSTS: "${ALLOWED_REPLAY_HOSTS:-}"
     mem_limit: "${MEMORY_LIMIT:-4g}"
     restart: unless-stopped
     init: true
@@ -89,7 +89,7 @@ services:
       # - ./fonts:/app/fonts:ro
       # - ./search.py:/app/search.py:ro
       # - ./tempurature.py:/app/tempurature.py:ro
-      - ./test_api.py:/app/test_api.py:ro
+      - ./flippedcoord.py:/app/test_api.py:ro
       - ./initsql.py:/app/initsql.py:ro
       # - ./statscache.json:/app/statscache.json:rw
       # - ./slurcloud.py:/app/slurcloud.py:ro
