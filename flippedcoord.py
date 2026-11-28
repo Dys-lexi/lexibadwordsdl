@@ -200,6 +200,8 @@ def parsegame(game,i=0):
     
 def main():
     threading.Thread(target=parseplayers,daemon=True).start()
+    CORS(app, resources={r"/*": {"origins": ["*.lexi.tf","lexi.tf"] or "*"}})
+    serve(app, host="0.0.0.0", port=3441, threads=20, connection_limit=200) 
 lock = threading.Lock()
 app = Flask(__name__)
 games = getnewgames()
@@ -208,10 +210,12 @@ games = getnewgames()
 def before_request():
     # print("woag")
     if request.headers.get("token") not in tokens:
+        print(request.headers.get("token"))
         return {"error": "pants"}, 401
 
 @app.route("/submitdemo",methods=["POST"])
 def submitdemo():
+    print("recieved parse request")
     for game in request.get_json():
         print("parsed game",game["results"]["deadlock-chat-messages"]["match"]["match_id"],"with",request.headers["token"])
         parsegame(game)
@@ -223,12 +227,11 @@ def geturls():
     toparse = []
     while len(toparse) < request.get_json()["count"]:
         with lock:
-            new = itertools.islice(games,request.get_json()["count"]-len(toparse))
+            new = list(itertools.islice(games,request.get_json()["count"]-len(toparse)))
         toparse.extend(list(filter(bool,map(lambda x: x(),new))))
     # print(toparse)
     return toparse
-CORS(app, resources={r"/*": {"origins": ["*.lexi.tf","lexi.tf"] or "*"}})
-serve(app, host="0.0.0.0", port=3441, threads=20, connection_limit=200) 
+
 
 if __name__ == "__main__":
     main()
