@@ -18,8 +18,8 @@ next refill. Workers continue processing and submitting demos during the wait.
 
 Haste posts completed replays to `COORDINATOR_ENDPOINT/submitdemo` as a JSON
 array, including when only one replay is ready. Both coordinator requests carry
-the `Token` header. A base URL ending in `/abc` gives the routes `/abc/geturls`
-and `/abc/submitdemo`.
+the `Token` header and have a 24-hour timeout per attempt. A base URL ending
+in `/abc` gives the routes `/abc/geturls` and `/abc/submitdemo`.
 
 One sender takes up to 50 finished demos per submission, oldest first. Haste
 reserves a place in the finished queue for each active parse and starts more

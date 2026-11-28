@@ -77,7 +77,7 @@ impl Coordinator {
                 )
                 .redirect(reqwest::redirect::Policy::none())
                 .retry(reqwest::retry::never())
-                .timeout(Duration::from_secs(60))
+                .timeout(Duration::from_secs(24 * 60 * 60))
                 .build()?,
             get_urls: route("geturls"),
             submit_demo: route("submitdemo"),

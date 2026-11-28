@@ -193,7 +193,7 @@ def parsegame(game,i=0):
             query.execute(f"INSERT INTO playermatches ({",".join(list(filter(lambda x: x in rows["playermatches"],{**data,"match_id":game["match"]["match_id"]})))}) VALUES ({",".join(["%s"]*len(list(filter(lambda x: x in rows["playermatches"],{**data,"match_id":game["match"]["match_id"]}))))}) ON CONFLICT DO NOTHING",list(map(lambda x: x[1],filter(lambda x: x[0] in rows["playermatches"],{**data,"match_id":game["match"]["match_id"]}.items()))))
             query.execute("INSERT INTO aliases (account_id, personaname, first_match_id, last_match_id) VALUES (%s, %s, %s, %s) ON CONFLICT (account_id, personaname) DO UPDATE SET first_match_id = LEAST(aliases.first_match_id, EXCLUDED.first_match_id), last_match_id = GREATEST(aliases.last_match_id, EXCLUDED.last_match_id)", (data["account_id"], data["personaname"], game["match"]["match_id"], game["match"]["match_id"]))
         query.commit()
-    print("saved game",game["match"]["match_id"],(int(time.time()-game["match"]["unix"])//3600),"h", int(((time.time()-game["match"]["unix"]) % 3600) // 60),"m", int((time.time()-game["match"]["unix"]) % 60),"s behind")
+    print("saved game",game["match"]["match_id"],(int(time.time()-game["match"]["unix"])//3600),"h", int(((time.time()-game["match"]["unix"]) % 3600) // 60),"m", int((time.time()-game["match"]["unix"]) % 60),"s behind",f"Pending save tasks: {parser._work_queue.qsize()}")
         
         
 
@@ -205,12 +205,13 @@ def main():
 lock = threading.Lock()
 app = Flask(__name__)
 games = getnewgames()
+parser = ThreadPoolExecutor(max_workers=10)
 
 @app.before_request
 def before_request():
     # print("woag")
     if request.headers.get("token") not in tokens:
-        print(request.headers.get("token"))
+        print("invalid header",request.headers.get("token"))
         return {"error": "pants"}, 401
 
 @app.route("/submitdemo",methods=["POST"])
@@ -221,7 +222,7 @@ def submitdemo():
         return {"oh god pls no","pants"}
     for game in request.get_json():
         # print("parsed game",game["results"]["deadlock-chat-messages"]["match"]["match_id"],"with",request.headers["token"])
-        parsegame(game)
+        parser.submit(parsegame, game)
     return {"great":"good"}
 
 @app.route("/geturls",methods=["POST"])
