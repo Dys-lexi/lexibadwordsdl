@@ -957,11 +957,14 @@ async fn coordinator_shares_queued_urls_and_submits_the_parse_response() {
     // Control demo completion independently of the coordinator refill.
     let gate = Arc::new(Semaphore::new(0));
     let blocked = gate.clone();
+    let started = Arc::new(AtomicUsize::new(0));
+    let starts = started.clone();
     let replay = upstream(
         Router::new()
             .route(
                 "/slow/{id}",
                 get(move |Path(id): Path<u64>, headers: HeaderMap| {
+                    starts.fetch_add(1, Ordering::SeqCst);
                     let blocked = blocked.clone();
                     async move {
                         assert!(!headers.contains_key("token"));
@@ -1020,7 +1023,8 @@ async fn coordinator_shares_queued_urls_and_submits_the_parse_response() {
                 "COORDINATOR_ENDPOINT",
                 coordinator.url.replace("/demo.dem.bz2", "/abc"),
             )
-            .env("DEMO_SURPLUS", "2")
+            .env("DEMO_SURPLUS", "52")
+            .env("MAX_FINISHED_DEMOS", "52")
             .env("MAX_CONCURRENT_REQUESTS", "2")
             .env("ALLOWED_REPLAY_HOSTS", "127.0.0.1")
             .spawn()
@@ -1028,14 +1032,14 @@ async fn coordinator_shares_queued_urls_and_submits_the_parse_response() {
     );
     tokio::time::timeout(Duration::from_secs(45), async {
         let (count, first) = counts.recv().await.unwrap();
-        assert_eq!(count, json!({"count": 4}));
+        assert_eq!(count, json!({"count": 54, "finished_count": 0}));
         first
             .send((1..=3).map(|id| format!("{slow}/{id}")).collect())
             .unwrap();
 
-        // Two workers are busy and one URL is waiting: refill just the missing URL.
+        // Two workers are busy and one URL is waiting.
         let (count, refill) = counts.recv().await.unwrap();
-        assert_eq!(count, json!({"count": 1}));
+        assert_eq!(count, json!({"count": 51, "finished_count": 0}));
         gate.add_permits(1);
         let (single, reply) = bodies.recv().await.unwrap();
         assert_eq!(single.as_array().unwrap().len(), 1);
@@ -1045,15 +1049,19 @@ async fn coordinator_shares_queued_urls_and_submits_the_parse_response() {
         refill.send(vec![]).unwrap();
 
         gate.add_permits(2);
-        // Recover after repeated failures. All three matches travel in one request.
+        // New completions wait behind the immutable retry batch.
         let (batch, reply) = bodies.recv().await.unwrap();
-        assert_eq!(batch[0], single[0]);
+        assert_eq!(batch, single);
         reply.send(StatusCode::SERVICE_UNAVAILABLE).unwrap();
         let (batch, reply) = bodies.recv().await.unwrap();
-        let mut ids: Vec<_> = batch
+        assert_eq!(batch, single);
+        reply.send(StatusCode::NO_CONTENT).unwrap();
+        let (others, reply) = bodies.recv().await.unwrap();
+        let mut ids: Vec<_> = others
             .as_array()
             .unwrap()
             .iter()
+            .chain(single.as_array().unwrap())
             .map(|entry| {
                 entry["results"]["deadlock-chat-messages"]["match"]["match_id"]
                     .as_u64()
@@ -1066,16 +1074,46 @@ async fn coordinator_shares_queued_urls_and_submits_the_parse_response() {
 
         let (count, refill) = counts.recv().await.unwrap();
         assert!(empty_at.elapsed() >= Duration::from_secs(30));
-        assert_eq!(count, json!({"count": 4}));
+        assert_eq!(count, json!({"count": 54, "finished_count": 0}));
         refill.send(vec![format!("{slow}/4")]).unwrap();
 
-        // A short response occupies one slot and leaves three URLs missing.
+        // A short response occupies one slot.
         let (count, refill) = counts.recv().await.unwrap();
-        assert_eq!(count, json!({"count": 3}));
-        refill.send(vec![]).unwrap();
+        assert_eq!(count, json!({"count": 53, "finished_count": 0}));
+        gate.add_permits(1);
+        let (batch, fourth_reply) = bodies.recv().await.unwrap();
+        assert_eq!(batch, json!([expected]));
+
+        // Keep the fourth upload open. Only 51 more parses can start.
+        refill
+            .send((5..=57).map(|id| format!("{slow}/{id}")).collect())
+            .unwrap();
+        gate.add_permits(51);
+        let mut next_id = 58;
+        let pending_refill = loop {
+            let (body, refill) = counts.recv().await.unwrap();
+            if body["finished_count"] == 52 {
+                break refill;
+            }
+            refill.send(vec![format!("{slow}/{next_id}")]).unwrap();
+            next_id += 1;
+        };
+        assert_eq!(started.load(Ordering::SeqCst), 55);
+        assert!(bodies.try_recv().is_err());
+        fourth_reply.send(StatusCode::NO_CONTENT).unwrap();
+        let (batch, reply) = bodies.recv().await.unwrap();
+        assert_eq!(batch.as_array().unwrap().len(), 50);
+        assert!(bodies.try_recv().is_err());
+        reply.send(StatusCode::NO_CONTENT).unwrap();
+        let (batch, reply) = bodies.recv().await.unwrap();
+        assert_eq!(batch.as_array().unwrap().len(), 1);
+        reply.send(StatusCode::NO_CONTENT).unwrap();
+
+        // The next queued URL can now complete.
+        pending_refill.send(vec![]).unwrap();
         gate.add_permits(1);
         let (batch, reply) = bodies.recv().await.unwrap();
-        assert_eq!(batch, json!([expected]));
+        assert_eq!(batch.as_array().unwrap().len(), 1);
         reply.send(StatusCode::NO_CONTENT).unwrap();
     })
     .await

@@ -1,6 +1,6 @@
 //! Outbound coordinator protocol for replay workers.
 
-use std::{collections::VecDeque, env, io, time::Duration};
+use std::{collections::VecDeque, env, io, num::NonZeroUsize, time::Duration};
 
 use reqwest::{
     Client, Response, Url,
@@ -8,7 +8,6 @@ use reqwest::{
 };
 use serde_json::json;
 use tokio::{
-    sync::mpsc,
     task::JoinSet,
     time::{Instant, sleep, sleep_until},
 };
@@ -19,11 +18,14 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 const EMPTY_QUEUE_DELAY: Duration = Duration::from_secs(30);
 const RETRY_DELAY: Duration = Duration::from_secs(2);
 
+const MAX_SUBMISSION_SIZE: usize = 50;
+
 struct Coordinator {
     client: Client,
     get_urls: Url,
     submit_demo: Url,
     surplus: usize,
+    max_finished: NonZeroUsize,
 }
 
 impl Coordinator {
@@ -63,6 +65,9 @@ impl Coordinator {
         let surplus = setting("DEMO_SURPLUS", "10")?
             .parse::<usize>()
             .map_err(|_| io::Error::other("DEMO_SURPLUS must be a nonnegative integer"))?;
+        let max_finished = setting("MAX_FINISHED_DEMOS", "50")?
+            .parse::<NonZeroUsize>()
+            .map_err(|_| io::Error::other("MAX_FINISHED_DEMOS must be a positive integer"))?;
         Ok(Self {
             client: Client::builder()
                 .default_headers(
@@ -77,6 +82,7 @@ impl Coordinator {
             get_urls: route("geturls"),
             submit_demo: route("submitdemo"),
             surplus,
+            max_finished,
         })
     }
 
@@ -94,9 +100,16 @@ impl Coordinator {
         Ok(response)
     }
 
-    async fn get_urls(&self, count: usize) -> Result<Vec<String>, Error> {
+    async fn get_urls(
+        &self,
+        requested_count: usize,
+        finished_count: usize,
+    ) -> Result<Vec<String>, Error> {
         let response = self
-            .post(&self.get_urls, json!({"count": count}).to_string())
+            .post(
+                &self.get_urls,
+                json!({"count": requested_count, "finished_count": finished_count}).to_string(),
+            )
             .await?;
         let body = response.bytes().await?;
         if body.is_empty() {
@@ -105,27 +118,15 @@ impl Coordinator {
         Ok(serde_json::from_slice(&body)?)
     }
 
-    async fn submit_completed(&self, mut completed: mpsc::UnboundedReceiver<String>) {
-        while let Some(first) = completed.recv().await {
-            let mut batch = String::from("[");
-            batch.push_str(&first);
-            drop(first);
-            let mut delay = RETRY_DELAY;
-            loop {
-                // Each worker sends one complete, already serialized JSON object.
-                while let Ok(result) = completed.try_recv() {
-                    batch.push(',');
-                    batch.push_str(&result);
-                }
-                batch.push(']');
-                match self.post(&self.submit_demo, batch.clone()).await {
-                    Ok(_) => break,
-                    Err(error) => {
-                        batch.pop();
-                        eprintln!("submitdemo failed, retrying in {delay:?}: {error}");
-                        sleep(delay).await;
-                        delay = (delay * 2).min(Duration::from_secs(60));
-                    }
+    async fn submit_batch(&self, body: String) {
+        let mut delay = RETRY_DELAY;
+        loop {
+            match self.post(&self.submit_demo, body.clone()).await {
+                Ok(_) => return,
+                Err(error) => {
+                    eprintln!("submitdemo failed, retrying in {delay:?}: {error}");
+                    sleep(delay).await;
+                    delay = (delay * 2).min(Duration::from_secs(60));
                 }
             }
         }
@@ -134,20 +135,6 @@ impl Coordinator {
 
 pub async fn run(config: Config, shutdown: impl Future<Output = ()>) -> Result<(), Error> {
     let coordinator = Coordinator::from_env()?;
-    let (completed, receiver) = mpsc::unbounded_channel();
-    let (result, ()) = tokio::join!(
-        process_urls(config, &coordinator, completed, shutdown),
-        coordinator.submit_completed(receiver),
-    );
-    result
-}
-
-async fn process_urls(
-    config: Config,
-    coordinator: &Coordinator,
-    completed: mpsc::UnboundedSender<String>,
-    shutdown: impl Future<Output = ()>,
-) -> Result<(), Error> {
     let capacity = config.max_concurrent_requests;
     let target = capacity
         .checked_add(coordinator.surplus)
@@ -155,19 +142,32 @@ async fn process_urls(
     let state = app_state(config)?;
     let mut workers = JoinSet::new();
     let mut waiting = VecDeque::new();
+    // The front of the queue stays here until the coordinator acknowledges its upload.
+    let mut finished: VecDeque<String> = VecDeque::new();
+    let mut submission = None;
     let mut next_poll = Instant::now();
     let mut refill = None;
     let mut stopping = false;
     tokio::pin!(shutdown);
     loop {
-        while let Some(worker) = workers.try_join_next() {
-            worker??;
+        if submission.is_none() && !finished.is_empty() {
+            let count = finished.len().min(MAX_SUBMISSION_SIZE);
+            let mut body = String::from("[");
+            for (index, demo) in finished.iter().take(count).enumerate() {
+                if index > 0 {
+                    body.push(',');
+                }
+                body.push_str(demo);
+            }
+            body.push(']');
+            submission = Some((count, Box::pin(coordinator.submit_batch(body))));
         }
-        while workers.len() < capacity {
+        // Reserve room for each active parse, even if every worker finishes together.
+        let parse_slots = coordinator.max_finished.get() - finished.len();
+        while workers.len() < capacity.min(parse_slots) {
             let Some(url) = waiting.pop_front() else {
                 break;
             };
-            let completed = completed.clone();
             let state = state.clone();
             workers.spawn(async move {
                 let request = ParseRequest {
@@ -175,23 +175,26 @@ async fn process_urls(
                     run: vec![Runner::ChatMessages],
                     match_start_unix: None,
                 };
-                match process_demo(&state, request).await {
-                    Ok(body) => completed
-                        .send(body)
-                        .map_err(|_| "submission queue closed")?,
-                    Err(error) => eprintln!("replay failed ({}): {}", error.code, error.message),
-                }
-                Ok::<(), Error>(())
+                process_demo(&state, request).await
             });
         }
-        if stopping && workers.is_empty() && refill.is_none() {
+        if stopping && workers.is_empty() && refill.is_none() && finished.is_empty() {
             return Ok(());
         }
         let missing = (target - workers.len()).saturating_sub(waiting.len());
         tokio::select! {
             biased;
             _ = &mut shutdown, if !stopping => stopping = true,
-            Some(worker) = workers.join_next(), if !workers.is_empty() => worker??,
+            _ = async { submission.as_mut().unwrap().1.as_mut().await }, if submission.is_some() => {
+                let (count, _) = submission.take().unwrap();
+                finished.drain(..count);
+            }
+            Some(worker) = workers.join_next(), if !workers.is_empty() => {
+                match worker? {
+                    Ok(body) => finished.push_back(body),
+                    Err(error) => eprintln!("replay failed ({}): {}", error.code, error.message),
+                }
+            }
             result = async { refill.as_mut().unwrap().await }, if refill.is_some() => {
                 let result: Result<Vec<String>, Error> = result;
                 refill = None;
@@ -205,7 +208,7 @@ async fn process_urls(
                 }
             }
             _ = sleep_until(next_poll), if !stopping && missing > 0 && refill.is_none() => {
-                refill = Some(Box::pin(coordinator.get_urls(missing)));
+                refill = Some(Box::pin(coordinator.get_urls(missing, finished.len())));
             }
         }
     }

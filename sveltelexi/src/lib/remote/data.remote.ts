@@ -265,6 +265,26 @@ export const getlucky = query(async () => {
 });
 
 
+export const dbstats = query(async () => {
+	let stats = {} as Record<string,number>
+	// console.log(profile)
+	let status = 500;
+	try {
+		const response = await fetch(`${API_URL}/stats`, {
+			method: 'GET'
+		});
+		status = response.status;
+		if (response.ok) {
+			stats = await response.json();
+		} else {
+			error(500);
+		}
+	} catch {
+		error(500, { message: status.toString() });
+	}
+
+	return { stats , statuscode: 200 };
+});
 export const search = query(	v.object({
 		name: v.string(),
 		querycount: v.number(),

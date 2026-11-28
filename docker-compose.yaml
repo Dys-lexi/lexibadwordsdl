@@ -7,6 +7,7 @@ services:
     environment:
       COORDINATOR_ENDPOINT: "${COORDINATOR_ENDPOINT:-https://deadlock.lexi.tf:443/haste}"
       TOKEN: "${TOKEN:-unknown}"
+      MAX_FINISHED_DEMOS: "${MAX_FINISHED_DEMOS:-50}"
       DEMO_SURPLUS: "${DEMO_SURPLUS:-20}"
       MAX_DOWNLOAD_BYTES: "${MAX_DOWNLOAD_BYTES:-536870912}"
       MAX_DOWNLOAD_SPEED:  "${MAX_DOWNLOAD_SPEED:-0}"

@@ -5,7 +5,7 @@
 	import faviconUrl from '$lib/images/logosmall.png';
 	import type { PageData } from './$types';
 	const utcDate = new Date('2026-07-23T08:00:00Z');
-	import { getwordclouddaily } from '$lib/remote/data.remote';
+	import { getwordclouddaily,dbstats } from '$lib/remote/data.remote';
 	import Search from '$lib/morestuff/Search.svelte';
 	const localTime = utcDate.toLocaleString()
 	// 	undefined, {
@@ -14,7 +14,7 @@
 
 	// 	day: 'numeric'
 	// });
-
+	let thing = await dbstats()
 	let blurradius = $state(23)
 
 	let { data }: { data: PageData } = $props();
@@ -41,7 +41,7 @@
 
 <div class="flexbox" style="gap: 30px; margin-top: 30px">
 	<div class="statsholder">
-		{#if statuscode == 200}
+		<!-- {#if statuscode == 200}
 			{#each Object.entries(stats) as [stat, val]}
 			{#if prettynames[stat]}
 				<div class="stat">
@@ -54,8 +54,9 @@
 			<div class="stat" style="color: red">
 				Backend is probably down :( {statuscode}
 			</div>
-		{/if}
+		{/if} -->
 	</div>
+	<div>{JSON.stringify(thing)}</div>
 	<div class="whomadethisshowthingy">
 		Made by
 		<u style="text-decoration-color: rgba(255,180,200,0.8)">
@@ -102,15 +103,15 @@
 		</u>
 	</div> -->
 </div>
-<svelte:head>
-	{#if statuscode == 200}
+<!-- <svelte:head> -->
+	<!-- {#if statuscode == 200}
 		<meta
 			name="description"
 			content={`Tracking bad words in ${stats.totalmessages.toLocaleString()} messages`}
 		/>
 	{:else}
 		<meta name="description" content="Find bad words and maybe slurs sent by people in TF2" />
-	{/if}
+	
 
 	<meta property="og:type" content="website" />
 	<meta property="og:url" content={page.url.href} />
@@ -148,4 +149,4 @@
 	{/if}
 
 	<meta name="twitter:image" content={`${page.url.origin}/logo.png`} />
-</svelte:head>
+</svelte:head> -->

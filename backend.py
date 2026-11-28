@@ -5,6 +5,7 @@ import time
 import traceback
 import random
 import functools
+from psycopg2 import sql
 from psycopg2.extras import Json
 from initsql import *
 from concurrent.futures import ThreadPoolExecutor, as_completed,wait, FIRST_COMPLETED
@@ -90,6 +91,22 @@ def getevents(account_id,match_id=False):
         query.execute(f"SELECT {",".join(rows["events"])} FROM events WHERE ({match_id and "match_id" or "killer_account_id"} = %s OR {match_id and "match_id" or "victim_account_id"} = %s)",(account_id,account_id))
         return functools.reduce(lambda a,b: {**a,b[rows["events"].index("match_id")]:[*a.get(b[rows["events"].index("match_id")],[]),dict(zip(rows["events"],b,strict=True))]} , query.fetchall(),{})
 
+# @cached(cache=TTLCache(maxsize=1024, ttl=86400))
+def statsc():
+    print("here")
+    counts = {}
+    with querywrapper() as query:
+        query.execute("""
+            SELECT schemaname, tablename FROM pg_catalog.pg_tables
+            WHERE schemaname = current_schema()
+        """)
+        for schema, table in query.fetchall():
+            if table != "match": continue
+            
+            query.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(schema, table)))
+            counts[table] = query.fetchone()[0]
+            print("doing",table)
+    return counts
 app = Flask(__name__)
 
 def accountidormatchid(request):
@@ -134,6 +151,10 @@ def events():
     if not id:
         return {}, 404
     return getevents(id,column=="match_id")
+
+@app.route("/stats", methods=["POST", "GET"])
+def stats():
+    return (statsc())
 
 @app.route("/playerdetails",methods=["POST","GET"])
 def details():

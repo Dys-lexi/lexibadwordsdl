@@ -215,19 +215,25 @@ def before_request():
 
 @app.route("/submitdemo",methods=["POST"])
 def submitdemo():
-    print("recieved parse request")
+    print("parsed",len(request.get_json()),"games with",request.headers["token"])
+    # return {"pants":"what"}
+    if len(request.get_json()) > 100:
+        return {"oh god pls no","pants"}
     for game in request.get_json():
-        print("parsed game",game["results"]["deadlock-chat-messages"]["match"]["match_id"],"with",request.headers["token"])
+        # print("parsed game",game["results"]["deadlock-chat-messages"]["match"]["match_id"],"with",request.headers["token"])
         parsegame(game)
     return {"great":"good"}
 
 @app.route("/geturls",methods=["POST"])
 def geturls():
-    print("got a request for",request.get_json()["count"],"demos from",request.headers["token"])
+    payload = request.get_json()
+    requested = payload["count"]
+    print("got a request for", requested, "demos from", request.headers["token"],
+          "finished demos:", payload.get("finished_count", "unknown"))
     toparse = []
-    while len(toparse) < request.get_json()["count"]:
+    while len(toparse) < requested:
         with lock:
-            new = list(itertools.islice(games,request.get_json()["count"]-len(toparse)))
+            new = list(itertools.islice(games,requested-len(toparse)))
         toparse.extend(list(filter(bool,map(lambda x: x(),new))))
     # print(toparse)
     return toparse

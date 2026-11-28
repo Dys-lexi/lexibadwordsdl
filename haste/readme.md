@@ -6,8 +6,10 @@ variables are unset or empty.
 
 Haste keeps one shared queue of replay URLs. Each free worker takes the next URL.
 Haste keeps up to `DEMO_SURPLUS` URLs waiting in addition to active work.
-It posts `{"count": N}` to `COORDINATOR_ENDPOINT/geturls` for the number of free
-worker slots plus the shortfall in the waiting queue. Only one refill runs at a
+It posts `{"count": N, "finished_count": F}` to `COORDINATOR_ENDPOINT/geturls`.
+`count` is the number of free worker slots plus the shortfall in the
+waiting queue. `finished_count` is the number of finished demos awaiting acknowledgement,
+including the current submission. Only one refill runs at a
 time. Workers continue taking queued URLs while it runs. The coordinator
 returns a JSON array of URL strings.
 Haste queues every URL in a partial batch and requests the remaining shortfall.
@@ -19,9 +21,11 @@ array, including when only one replay is ready. Both coordinator requests carry
 the `Token` header. A base URL ending in `/abc` gives the routes `/abc/geturls`
 and `/abc/submitdemo`.
 
-One sender handles submissions while workers continue parsing. If a POST fails,
-Haste keeps the failed matches in memory and adds newly completed matches to
-the next attempt. It retries after 2 seconds and doubles the delay on each
+One sender takes up to 50 finished demos per submission, oldest first. Haste
+reserves a place in the finished queue for each active parse and starts more
+parses as successful uploads free space. `MAX_FINISHED_DEMOS` sets the queue
+capacity, including the current submission. If a POST fails, Haste retains the
+same batch in memory. It retries after 2 seconds and doubles the delay on each
 failure, up to 60 seconds, until the coordinator returns a successful HTTP
 status. The coordinator should accept repeat submissions for a match if a
 previous acknowledgement was lost.
@@ -139,6 +143,7 @@ Configuration (environment variables):
 | `COORDINATOR_ENDPOINT` | `https://deadlock.lexi.tf:443/haste` | Coordinator base URL including any path prefix |
 | `TOKEN` | `unknown` | Shared coordinator token |
 | `DEMO_SURPLUS` | `10` | Target number of URLs waiting for a worker |
+| `MAX_FINISHED_DEMOS` | `50` | Maximum finished demos awaiting upload acknowledgement (positive integer) |
 | `MAX_DOWNLOAD_BYTES` | `536870912` | Maximum downloaded size (512 MiB) |
 | `MAX_DOWNLOAD_SPEED` | `0` | Combined replay download rate in Mbps (`0` is unlimited) |
 | `MAX_DEMO_BYTES` | `2147483648` | Maximum decompressed size (2 GiB) |
